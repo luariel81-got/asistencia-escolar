@@ -958,25 +958,67 @@ def main():
     institucion_nombre = get_config("institucion_nombre")
     logo_b64 = get_config("institucion_logo")
 
+    # CSS para botones de navegación del sidebar
+    st.markdown("""
+    <style>
+    /* Botones de navegación: ancho completo, alineados a la izquierda, tamaño cómodo */
+    [data-testid="stSidebar"] .stButton > button {
+        width: 100% !important;
+        text-align: left !important;
+        justify-content: flex-start !important;
+        padding: 12px 16px !important;
+        font-size: 15px !important;
+        font-weight: 500 !important;
+        border-radius: 10px !important;
+        border: none !important;
+        background: transparent !important;
+        margin-bottom: 2px !important;
+        min-height: 50px !important;
+    }
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(255,255,255,0.08) !important;
+    }
+    .nav-activo button {
+        background: rgba(46,204,113,0.15) !important;
+        border-left: 3px solid #2ecc71 !important;
+        color: #2ecc71 !important;
+        font-weight: 700 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    PAGINAS = [
+        ("📋 Pasar Lista",          "lista"),
+        ("📊 Resumen por Grado",    "resumen"),
+        ("🚨 Alertas de Faltas",    "alertas"),
+        ("🎓 Gestión de Estudiantes","gestion"),
+        ("⚙️ Configuración",        "config"),
+    ]
+
+    if "pagina_sel" not in st.session_state:
+        st.session_state["pagina_sel"] = "lista"
+
     with st.sidebar:
         if logo_b64:
             st.markdown(
-                f'<img src="data:image/png;base64,{logo_b64}" style="max-height:80px;border-radius:8px;margin-bottom:8px;">',
+                f'<img src="data:image/png;base64,{logo_b64}" style="max-height:72px;border-radius:8px;margin-bottom:6px;">',
                 unsafe_allow_html=True,
             )
         else:
-            st.image("https://upload.wikimedia.org/wikipedia/commons/2/27/Flag_of_Paraguay.svg", width=80)
+            st.image("https://upload.wikimedia.org/wikipedia/commons/2/27/Flag_of_Paraguay.svg", width=70)
 
-        st.title("🏫 " + institucion_nombre)
+        st.markdown(f"### {institucion_nombre}")
         st.caption("MEC Paraguay · Tercer Ciclo & Nivel Medio")
         st.divider()
 
-        pagina = st.radio(
-            "Navegación",
-            ["📋 Pasar Lista","📊 Resumen por Grado","🚨 Alertas de Faltas",
-             "🎓 Gestión de Estudiantes","⚙️ Configuración"],
-            label_visibility="collapsed",
-        )
+        for label, key in PAGINAS:
+            activo = st.session_state["pagina_sel"] == key
+            css_class = "nav-activo" if activo else ""
+            st.markdown(f'<div class="{css_class}">', unsafe_allow_html=True)
+            if st.button(label, key=f"nav_{key}"):
+                st.session_state["pagina_sel"] = key
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
 
         st.divider()
         st.caption(f"📅 Hoy: {date.today().strftime('%d/%m/%Y')}")
@@ -984,21 +1026,21 @@ def main():
         n_reg = run_df("SELECT COUNT(*) as c FROM asistencia")["c"][0]
         st.metric("Total Estudiantes", n_est)
         st.metric("Registros de Asistencia", n_reg)
-
         st.divider()
-        if st.button("🚪 Cerrar sesión"):
+        if st.button("🚪 Cerrar sesión", key="nav_logout"):
             st.session_state["autenticado"] = False
             st.rerun()
 
-    if pagina == "📋 Pasar Lista":
+    pagina = st.session_state["pagina_sel"]
+    if pagina == "lista":
         pagina_pasar_lista()
-    elif pagina == "📊 Resumen por Grado":
+    elif pagina == "resumen":
         pagina_resumen()
-    elif pagina == "🚨 Alertas de Faltas":
+    elif pagina == "alertas":
         pagina_alertas()
-    elif pagina == "🎓 Gestión de Estudiantes":
+    elif pagina == "gestion":
         pagina_gestion()
-    elif pagina == "⚙️ Configuración":
+    elif pagina == "config":
         pagina_configuracion()
 
 

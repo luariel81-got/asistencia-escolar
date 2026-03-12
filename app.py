@@ -483,11 +483,11 @@ def inject_css():
     .alumno-nombre {
         font-size: 15px;
         font-weight: 700;
-        color: #f0f2f6;
+        color: #0f1117;
         text-transform: uppercase;
         letter-spacing: 0.3px;
     }
-    .alumno-ci { font-size: 12px; color: #8a8fa8; margin-top: 2px; }
+    .alumno-ci { font-size: 12px; color: #555; margin-top: 2px; }
 
     /* ── Botones P/A/J circulares ── */
     .paj-btns {

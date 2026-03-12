@@ -40,49 +40,55 @@ def pagina_login():
     """Pantalla de inicio de sesión."""
     st.markdown("""
     <style>
-    .login-box {
-        max-width: 420px;
-        margin: 80px auto 0 auto;
-        background: #1e2130;
-        border-radius: 18px;
-        padding: 40px 36px 32px 36px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+    /* Ocultar sidebar y header en login */
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="stHeader"]  { display: none !important; }
+    .main .block-container {
+        max-width: 440px !important;
+        margin: 0 auto !important;
+        padding-top: 80px !important;
     }
+    .login-header {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+    .login-icon { font-size: 56px; line-height: 1.1; }
     .login-title {
         font-size: 26px;
         font-weight: 700;
-        color: #ffffff;
-        text-align: center;
-        margin-bottom: 6px;
+        margin-top: 8px;
+        color: #0f1117;
     }
     .login-sub {
         font-size: 13px;
-        color: #8a8fa8;
-        text-align: center;
-        margin-bottom: 28px;
+        color: #666;
+        margin-top: 4px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-    col_l, col_c, col_r = st.columns([1, 2, 1])
-    with col_c:
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
-        st.markdown('<div class="login-title">🏫 Asistencia Escolar</div>', unsafe_allow_html=True)
-        st.markdown('<div class="login-sub">MEC Paraguay · Tercer Ciclo & Nivel Medio</div>', unsafe_allow_html=True)
+    # Encabezado visual limpio — solo HTML estático, sin widgets dentro
+    st.markdown("""
+    <div class="login-header">
+        <div class="login-icon">🏫</div>
+        <div class="login-title">Asistencia Escolar</div>
+        <div class="login-sub">MEC Paraguay &middot; Tercer Ciclo &amp; Nivel Medio</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-        usuario = st.text_input("👤 Usuario", placeholder="Ingresá tu usuario")
-        contrasena = st.text_input("🔒 Contraseña", type="password", placeholder="Ingresá tu contraseña")
+    usuario   = st.text_input("👤 Usuario", placeholder="Ingresá tu usuario")
+    contrasena = st.text_input("🔒 Contraseña", type="password", placeholder="Ingresá tu contraseña")
 
-        if st.button("Ingresar", type="primary", use_container_width=True):
-            usuario_ok = st.secrets.get("app_usuario", "Lucasmen")
-            clave_ok   = st.secrets.get("app_password", "123456")
-            if usuario == usuario_ok and contrasena == clave_ok:
-                st.session_state["autenticado"] = True
-                st.rerun()
-            else:
-                st.error("❌ Usuario o contraseña incorrectos.")
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
-        st.markdown('</div>', unsafe_allow_html=True)
+    if st.button("Ingresar", type="primary", use_container_width=True):
+        usuario_ok = st.secrets.get("app_usuario", "Lucasmen")
+        clave_ok   = st.secrets.get("app_password", "123456")
+        if usuario == usuario_ok and contrasena == clave_ok:
+            st.session_state["autenticado"] = True
+            st.rerun()
+        else:
+            st.error("❌ Usuario o contraseña incorrectos.")
 
 
 def verificar_login():

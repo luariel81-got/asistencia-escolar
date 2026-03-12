@@ -5,7 +5,6 @@ importación PDF, edición de estudiantes, logo institucional.
 """
 
 import streamlit as st
-import extra_streamlit_components as stx
 import psycopg2
 import psycopg2.extras
 import pandas as pd
@@ -38,10 +37,44 @@ ESTADOS = ["Presente", "Ausente Injustificado", "Ausente Justificado"]
 # LOGIN
 # ─────────────────────────────────────────────
 
-@st.cache_resource
-def get_cookie_manager():
-    """Cookie manager singleton — debe llamarse una sola vez."""
-    return stx.CookieManager(key="cm")
+def _leer_cookie_js():
+    """Inyecta JS que lee la cookie y la pasa a Streamlit via query_params."""
+    st.components.v1.html("""
+    <script>
+    function getCookie(name) {
+        const v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+        return v ? v[2] : null;
+    }
+    const val = getCookie("asistencia_sesion");
+    if (val === "ok") {
+        // Recargar con param para que Python lo detecte
+        if (!window.location.search.includes("sesion=ok")) {
+            const url = window.location.href.split("?")[0] + "?sesion=ok";
+            window.parent.location.href = url;
+        }
+    }
+    </script>
+    """, height=0)
+
+
+def _set_cookie_js():
+    """Inyecta JS que escribe la cookie de sesión por 7 días."""
+    st.components.v1.html("""
+    <script>
+    const d = new Date();
+    d.setTime(d.getTime() + 7*24*60*60*1000);
+    document.cookie = "asistencia_sesion=ok; expires=" + d.toUTCString() + "; path=/; SameSite=Lax";
+    </script>
+    """, height=0)
+
+
+def _clear_cookie_js():
+    """Inyecta JS que borra la cookie."""
+    st.components.v1.html("""
+    <script>
+    document.cookie = "asistencia_sesion=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+    </script>
+    """, height=0)
 
 
 def pagina_login():
@@ -75,27 +108,21 @@ def pagina_login():
         clave_ok   = st.secrets.get("app_password", "123456")
         if usuario == usuario_ok and contrasena == clave_ok:
             st.session_state["autenticado"] = True
-            # Guardar cookie por 7 días
-            cm = get_cookie_manager()
-            cm.set("sesion_activa", "1", max_age=60*60*24*7)
+            _set_cookie_js()
             st.rerun()
         else:
             st.error("❌ Usuario o contraseña incorrectos.")
 
 
 def verificar_login():
-    """Devuelve True si el usuario está autenticado (session_state O cookie)."""
+    """Devuelve True si autenticado en session_state o via query param (cookie JS)."""
     if st.session_state.get("autenticado"):
         return True
-    # Intentar leer cookie
-    try:
-        cm = get_cookie_manager()
-        val = cm.get("sesion_activa")
-        if val == "1":
-            st.session_state["autenticado"] = True
-            return True
-    except Exception:
-        pass
+    # Cookie leída via JS → query param
+    params = st.query_params
+    if params.get("sesion") == "ok":
+        st.session_state["autenticado"] = True
+        return True
     return False
 
 
@@ -1108,11 +1135,8 @@ def main():
         st.divider()
         if st.button("🚪 Cerrar sesión", key="nav_logout"):
             st.session_state["autenticado"] = False
-            try:
-                cm = get_cookie_manager()
-                cm.delete("sesion_activa")
-            except Exception:
-                pass
+            _clear_cookie_js()
+            st.query_params.clear()
             st.rerun()
 
     pagina = st.session_state["pagina_sel"]

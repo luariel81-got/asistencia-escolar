@@ -13,6 +13,7 @@ from datetime import date, timedelta
 import random
 import io
 import base64
+import json
 import pdfplumber
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -552,49 +553,6 @@ def inject_css():
 def pagina_pasar_lista():
     st.header("📋 Pasar Lista")
 
-    # CSS: radio buttons → círculos P/A/J
-    st.markdown("""
-    <style>
-    div[data-testid="stRadio"] > label { display:none !important; }
-    div[data-testid="stRadio"] > div {
-        flex-direction: row !important;
-        gap: 8px !important;
-        align-items: center !important;
-        margin-top: 0 !important;
-    }
-    div[data-testid="stRadio"] > div > label {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        width: 44px !important; height: 44px !important;
-        border-radius: 50% !important;
-        font-weight: 700 !important; font-size: 15px !important;
-        cursor: pointer !important;
-        padding: 0 !important; margin: 0 !important;
-        transition: all 0.12s !important;
-    }
-    div[data-testid="stRadio"] > div > label > div:first-child { display:none !important; }
-    div[data-testid="stRadio"] > div > label:nth-child(1) {
-        border: 2px solid #2ecc71 !important; color: #2ecc71 !important; background: transparent !important;
-    }
-    div[data-testid="stRadio"] > div > label:nth-child(2) {
-        border: 2px solid #e74c3c !important; color: #e74c3c !important; background: transparent !important;
-    }
-    div[data-testid="stRadio"] > div > label:nth-child(3) {
-        border: 2px solid #f39c12 !important; color: #f39c12 !important; background: transparent !important;
-    }
-    div[data-testid="stRadio"] > div > label:nth-child(1):has(input:checked) {
-        background: #2ecc71 !important; color: #fff !important;
-    }
-    div[data-testid="stRadio"] > div > label:nth-child(2):has(input:checked) {
-        background: #e74c3c !important; color: #fff !important;
-    }
-    div[data-testid="stRadio"] > div > label:nth-child(3):has(input:checked) {
-        background: #f39c12 !important; color: #fff !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
     col1, col2 = st.columns([2, 1])
     with col1:
         grado_sel = st.selectbox("Grado", TODOS_LOS_GRADOS, key="lista_grado")
@@ -606,11 +564,10 @@ def pagina_pasar_lista():
         st.warning(f"⚠️ No hay estudiantes en **{grado_sel}**.")
         return
 
-    OPCIONES = ["P", "A", "J"]
     ESTADO_A_OPCION = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
     OPCION_A_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
 
-    # Cargar estados desde BD solo cuando cambia grado o fecha
+    # Construir estado inicial
     cache_key = f"cache_{grado_sel}_{fecha_sel}"
     if st.session_state.get("lista_cache_key") != cache_key:
         for _, row in df.iterrows():
@@ -625,39 +582,133 @@ def pagina_pasar_lista():
             st.session_state[f"est_{row['estudiante_id']}"] = "P"
         st.rerun()
 
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
+    # ── Lista 100% en JavaScript — cero viajes al servidor al tocar P/A/J ──
+    # Construir datos para el componente HTML
+    alumnos_js = []
     for _, row in df.iterrows():
-        key = f"est_{row['estudiante_id']}"
-        ci_text = str(row.get("ci", "") or "")
-        opcion_actual = st.session_state.get(key, "P")
-        idx = OPCIONES.index(opcion_actual) if opcion_actual in OPCIONES else 0
+        eid = int(row["estudiante_id"])
         nombre = str(row["nombre"])
+        ci = str(row.get("ci", "") or "")
+        estado = st.session_state.get(f"est_{eid}", "P")
+        alumnos_js.append({"id": eid, "nombre": nombre, "ci": ci, "estado": estado})
 
-        # Nombre + CI (col ancha) | P/A/J (col radio)
-        col_nom, col_rad = st.columns([4, 3])
-        with col_nom:
-            st.write(f"**{nombre}**")
-            if ci_text:
-                st.caption(ci_text)
-        with col_rad:
-            st.radio(
-                label="estado",
-                options=OPCIONES,
-                index=idx,
-                key=key,
-                horizontal=True,
-                label_visibility="collapsed",
-            )
-        st.divider()
+    import json
+    alumnos_json = json.dumps(alumnos_js, ensure_ascii=False)
 
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    componente_html = f"""
+    <style>
+    .lista-wrap {{ font-family: sans-serif; }}
+    .alumno-row {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 4px;
+        border-bottom: 1px solid rgba(128,128,128,0.2);
+        gap: 8px;
+    }}
+    .alumno-info {{ flex: 1; min-width: 0; }}
+    .alumno-nombre {{
+        font-size: 14px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: inherit;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }}
+    .alumno-ci {{ font-size: 11px; opacity: 0.55; }}
+    .paj-group {{ display: flex; gap: 8px; flex-shrink: 0; }}
+    .paj-btn {{
+        width: 42px; height: 42px;
+        border-radius: 50%;
+        border: 2px solid;
+        font-weight: 700;
+        font-size: 15px;
+        cursor: pointer;
+        background: transparent;
+        transition: all 0.1s;
+        display: flex; align-items: center; justify-content: center;
+    }}
+    .btn-P {{ border-color: #2ecc71; color: #2ecc71; }}
+    .btn-P.activo {{ background: #2ecc71; color: #fff; }}
+    .btn-A {{ border-color: #e74c3c; color: #e74c3c; }}
+    .btn-A.activo {{ background: #e74c3c; color: #fff; }}
+    .btn-J {{ border-color: #f39c12; color: #f39c12; }}
+    .btn-J.activo {{ background: #f39c12; color: #fff; }}
+    </style>
+
+    <div class="lista-wrap" id="lista-container"></div>
+    <input type="hidden" id="estados-output" value="">
+
+    <script>
+    const alumnos = {alumnos_json};
+    const estados = {{}};
+    alumnos.forEach(a => estados[a.id] = a.estado);
+
+    function render() {{
+        const container = document.getElementById("lista-container");
+        container.innerHTML = "";
+        alumnos.forEach(a => {{
+            const est = estados[a.id] || "P";
+            const row = document.createElement("div");
+            row.className = "alumno-row";
+            row.innerHTML = `
+                <div class="alumno-info">
+                    <div class="alumno-nombre">${{a.nombre}}</div>
+                    ${{a.ci ? `<div class="alumno-ci">${{a.ci}}</div>` : ""}}
+                </div>
+                <div class="paj-group">
+                    <button class="paj-btn btn-P ${{est==="P"?"activo":""}}"
+                        onclick="marcar(${{a.id}}, 'P')">P</button>
+                    <button class="paj-btn btn-A ${{est==="A"?"activo":""}}"
+                        onclick="marcar(${{a.id}}, 'A')">A</button>
+                    <button class="paj-btn btn-J ${{est==="J"?"activo":""}}"
+                        onclick="marcar(${{a.id}}, 'J')">J</button>
+                </div>`;
+            container.appendChild(row);
+        }});
+        // Sincronizar valor oculto para lectura desde Python vía query_params trick
+        document.getElementById("estados-output").value = JSON.stringify(estados);
+    }}
+
+    function marcar(id, val) {{
+        estados[id] = val;
+        render();
+        // Enviar a Streamlit via postMessage
+        const msg = {{type: "streamlit:setComponentValue", value: JSON.stringify(estados)}};
+        window.parent.postMessage(msg, "*");
+    }}
+
+    render();
+    </script>
+    """
+
+    # Renderizar con altura dinámica según cantidad de alumnos
+    altura = min(max(len(df) * 68, 200), 700)
+    resultado = st.components.v1.html(componente_html, height=altura, scrolling=True)
+
+    # Campo oculto donde JS deposita los estados actuales al guardar
+    st.markdown("**Cuando terminés de marcar, tocá Guardar:**")
+    estados_raw = st.text_area(
+        "estados_json",
+        value=json.dumps({str(int(row["estudiante_id"])): st.session_state.get(f"est_{int(row['estudiante_id'])}", "P") for _, row in df.iterrows()}),
+        key="estados_json_field",
+        label_visibility="collapsed",
+        height=68,
+    )
+    st.caption("↑ Este campo se actualiza automáticamente. No lo modifiques.")
+
     if st.button("💾 Guardar Asistencia", type="primary", use_container_width=True):
-        registros = [
-            (row["estudiante_id"], fecha_sel,
-             OPCION_A_ESTADO.get(st.session_state.get(f"est_{row['estudiante_id']}", "P"), "Presente"))
-            for _, row in df.iterrows()
-        ]
+        try:
+            estados_dict = json.loads(estados_raw)
+        except Exception:
+            estados_dict = {}
+        registros = []
+        for _, row in df.iterrows():
+            eid = str(int(row["estudiante_id"]))
+            opcion = estados_dict.get(eid, st.session_state.get(f"est_{eid}", "P"))
+            estado_final = OPCION_A_ESTADO.get(opcion, "Presente")
+            registros.append((row["estudiante_id"], fecha_sel, estado_final))
         guardar_asistencia(registros)
         st.success(f"✅ Asistencia guardada — {grado_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
         st.balloons()

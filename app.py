@@ -130,8 +130,7 @@ def verificar_login():
 # CONEXIÓN BASE DE DATOS
 # ─────────────────────────────────────────────
 
-@st.cache_resource
-def get_conn():
+def _nueva_conexion():
     return psycopg2.connect(
         host=st.secrets["db_host"],
         port=st.secrets["db_port"],
@@ -143,14 +142,41 @@ def get_conn():
     )
 
 
+def get_conn():
+    """Devuelve conexión activa. Si está caída o en error, reconecta automáticamente."""
+    if "db_conn" not in st.session_state or st.session_state["db_conn"] is None:
+        st.session_state["db_conn"] = _nueva_conexion()
+    conn = st.session_state["db_conn"]
+    try:
+        if conn.closed:
+            raise Exception("cerrada")
+        if conn.status == psycopg2.extensions.STATUS_IN_TRANSACTION:
+            conn.rollback()
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        conn = _nueva_conexion()
+        st.session_state["db_conn"] = conn
+    return conn
+
+
 def run_query(sql, params=None, fetch=True):
     conn = get_conn()
-    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute(sql, params or ())
-        if fetch:
-            return cur.fetchall()
-        conn.commit()
-        return None
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params or ())
+            if fetch:
+                return cur.fetchall()
+            conn.commit()
+            return None
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise e
 
 
 def run_df(sql, params=None) -> pd.DataFrame:

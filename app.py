@@ -219,16 +219,20 @@ def init_db():
             );
         """)
         cur.execute("ALTER TABLE estudiantes ADD COLUMN IF NOT EXISTS ci TEXT;")
+        # Migrar BTC → BC antes de insertar nuevos grados
+        cur.execute("""
+            UPDATE grados
+            SET nombre = REPLACE(nombre, 'BTC', 'BC'),
+                nivel  = REPLACE(nivel,  'BTC', 'BC')
+            WHERE nombre LIKE '%%BTC%%'
+        """)
+        # Insertar/actualizar grados según configuración actual
         for nivel, lista in GRADOS.items():
             for grado in lista:
                 cur.execute(
                     "INSERT INTO grados (nombre, nivel) VALUES (%s, %s) ON CONFLICT (nombre) DO UPDATE SET nivel=EXCLUDED.nivel",
                     (grado, nivel),
                 )
-        # Renombrar BTC → BC en registros existentes
-        cur.execute("UPDATE grados SET nombre=REPLACE(nombre,'BTC','BC'), nivel=REPLACE(nivel,'BTC','BC') WHERE nombre LIKE '%%BTC%%'")
-        # Actualizar estudiantes que tenían grados BTC
-        cur.execute("UPDATE estudiantes SET grado_id=g_new.id FROM grados g_new WHERE g_new.nombre = REPLACE((SELECT nombre FROM grados WHERE id=grado_id),'BTC','BC') AND (SELECT nombre FROM grados WHERE id=grado_id) LIKE '%%BTC%%'")
         for clave, valor in [
             ("institucion_nombre", "Institución Educativa"),
             ("institucion_logo", ""),

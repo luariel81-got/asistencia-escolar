@@ -552,7 +552,7 @@ def inject_css():
 def pagina_pasar_lista():
     st.header("📋 Pasar Lista")
 
-    # CSS: radio buttons → círculos P/A/J sin recarga de página
+    # CSS: radio buttons → círculos P/A/J
     st.markdown("""
     <style>
     div[data-testid="stRadio"] > label { display:none !important; }
@@ -560,7 +560,7 @@ def pagina_pasar_lista():
         flex-direction: row !important;
         gap: 8px !important;
         align-items: center !important;
-        margin-top: 6px !important;
+        margin-top: 0 !important;
     }
     div[data-testid="stRadio"] > div > label {
         display: flex !important;
@@ -629,26 +629,27 @@ def pagina_pasar_lista():
 
     for _, row in df.iterrows():
         key = f"est_{row['estudiante_id']}"
-        ci_text = row.get("ci", "") or ""
+        ci_text = str(row.get("ci", "") or "")
         opcion_actual = st.session_state.get(key, "P")
         idx = OPCIONES.index(opcion_actual) if opcion_actual in OPCIONES else 0
         nombre = str(row["nombre"])
 
-        st.markdown(
-            f"<div style='font-size:15px;font-weight:700;color:#0f1117;"
-            f"text-transform:uppercase;padding:10px 0 0 0;letter-spacing:0.3px;'>{nombre}</div>"
-            f"<div style='font-size:12px;color:#666;margin-bottom:2px;'>{ci_text}</div>",
-            unsafe_allow_html=True,
-        )
-        st.radio(
-            label="estado",
-            options=OPCIONES,
-            index=idx,
-            key=key,
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-        st.markdown("<hr style='margin:6px 0;opacity:0.12'>", unsafe_allow_html=True)
+        # Nombre + CI (col ancha) | P/A/J (col radio)
+        col_nom, col_rad = st.columns([4, 3])
+        with col_nom:
+            st.write(f"**{nombre}**")
+            if ci_text:
+                st.caption(ci_text)
+        with col_rad:
+            st.radio(
+                label="estado",
+                options=OPCIONES,
+                index=idx,
+                key=key,
+                horizontal=True,
+                label_visibility="collapsed",
+            )
+        st.divider()
 
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
     if st.button("💾 Guardar Asistencia", type="primary", use_container_width=True):
@@ -775,7 +776,7 @@ def pagina_alertas():
 
 def pagina_gestion():
     st.header("🎓 Gestión de Estudiantes")
-    tabs = st.tabs(["➕ Agregar","📥 Importar PDF","✏️ Editar / Mover","🗑️ Eliminar"])
+    tabs = st.tabs(["➕ Agregar","📥 Importar PDF","✏️ Editar / Mover","📞 Contactos","🗑️ Eliminar"])
 
     with tabs[0]:
         with st.form("form_agregar"):
@@ -842,6 +843,51 @@ def pagina_gestion():
                     st.rerun()
 
     with tabs[3]:
+        st.subheader("📞 Contactos de estudiantes")
+        st.caption("Agregá o editá el número de contacto. Tocá el botón para abrir WhatsApp.")
+        grado_cont = st.selectbox("Grado", TODOS_LOS_GRADOS, key="cont_grado")
+        df_cont = get_estudiantes_por_grado(grado_cont)
+        if df_cont.empty:
+            st.info(f"No hay estudiantes en {grado_cont}.")
+        else:
+            for _, row in df_cont.iterrows():
+                contacto_actual = str(row.get("contacto", "") or "")
+                c1, c2, c3 = st.columns([3, 2, 1])
+                c1.write(f"**{row['nombre']}**")
+
+                # Campo editable para el número
+                nuevo_num = c2.text_input(
+                    "Número",
+                    value=contacto_actual,
+                    key=f"cont_{row['id']}",
+                    placeholder="0981-xxx-xxx",
+                    label_visibility="collapsed",
+                )
+
+                # Guardar si cambió
+                if nuevo_num != contacto_actual:
+                    conn = get_conn()
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE estudiantes SET contacto=%s WHERE id=%s", (nuevo_num.strip(), row["id"]))
+                        conn.commit()
+
+                # Botón WhatsApp — abre chat directo
+                if contacto_actual:
+                    # Limpiar número: solo dígitos, agregar código Paraguay si empieza con 0
+                    num_limpio = "".join(filter(str.isdigit, contacto_actual))
+                    if num_limpio.startswith("0"):
+                        num_limpio = "595" + num_limpio[1:]
+                    wa_url = f"https://wa.me/{num_limpio}"
+                    c3.markdown(
+                        f'<a href="{wa_url}" target="_blank" style="text-decoration:none;font-size:22px;">💬</a>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    c3.write("—")
+
+                st.markdown("<hr style='margin:4px 0;opacity:0.1'>", unsafe_allow_html=True)
+
+    with tabs[4]:
         st.subheader("🗑️ Eliminar estudiante")
         grado_del = st.selectbox("Grado", TODOS_LOS_GRADOS, key="del_grado")
         df_del = get_estudiantes_por_grado(grado_del)

@@ -688,7 +688,19 @@ def pagina_pasar_lista():
     resultado = st.components.v1.html(componente_html, height=altura, scrolling=True)
 
     # Campo oculto donde JS deposita los estados actuales al guardar
-    st.markdown("**Cuando terminés de marcar, tocá Guardar:**")
+    # Campo oculto — CSS por key específico, no afecta otros textareas
+    st.markdown('''
+    <style>
+    [data-testid="stTextArea"]:has(textarea[aria-label="estados_json"]),
+    div:has(> [data-testid="stTextArea"] textarea[aria-label="estados_json"]) {
+        display: none !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    </style>
+    ''', unsafe_allow_html=True)
     estados_raw = st.text_area(
         "estados_json",
         value=json.dumps({str(int(row["estudiante_id"])): st.session_state.get(f"est_{int(row['estudiante_id'])}", "P") for _, row in df.iterrows()}),
@@ -696,7 +708,7 @@ def pagina_pasar_lista():
         label_visibility="collapsed",
         height=68,
     )
-    st.caption("↑ Este campo se actualiza automáticamente. No lo modifiques.")
+    st.markdown("**Cuando terminés de marcar, tocá Guardar:**")
 
     if st.button("💾 Guardar Asistencia", type="primary", use_container_width=True):
         try:

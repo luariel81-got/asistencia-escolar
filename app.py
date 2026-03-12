@@ -597,6 +597,7 @@ def pagina_pasar_lista():
 
     componente_html = f"""
     <style>
+    body {{ margin:0; padding:0; background:transparent; }}
     .lista-wrap {{ font-family: sans-serif; }}
     .alumno-row {{
         display: flex;
@@ -611,12 +612,12 @@ def pagina_pasar_lista():
         font-size: 14px;
         font-weight: 700;
         text-transform: uppercase;
-        color: inherit;
+        color: var(--txt);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }}
-    .alumno-ci {{ font-size: 11px; opacity: 0.55; }}
+    .alumno-ci {{ font-size: 11px; color: var(--txt); opacity: 0.55; }}
     .paj-group {{ display: flex; gap: 8px; flex-shrink: 0; }}
     .paj-btn {{
         width: 42px; height: 42px;
@@ -679,6 +680,19 @@ def pagina_pasar_lista():
         window.parent.postMessage(msg, "*");
     }}
 
+    // Detectar tema del padre y aplicar color de texto
+    function applyTheme() {{
+        try {{
+            const bg = window.parent.document.body.style.backgroundColor
+                    || window.parent.getComputedStyle(window.parent.document.body).backgroundColor;
+            // Si el fondo es oscuro, texto claro
+            const isDark = bg.includes("14, 17, 23") || bg.includes("rgb(14") || bg.includes("#0e1117");
+            document.documentElement.style.setProperty("--txt", isDark ? "#f0f2f6" : "#0f1117");
+        }} catch(e) {{
+            document.documentElement.style.setProperty("--txt", "#f0f2f6");
+        }}
+    }}
+    applyTheme();
     render();
     </script>
     """

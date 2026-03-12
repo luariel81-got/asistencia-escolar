@@ -632,29 +632,23 @@ def pagina_pasar_lista():
         ci_text = row.get("ci", "") or ""
         opcion_actual = st.session_state.get(key, "P")
         idx = OPCIONES.index(opcion_actual) if opcion_actual in OPCIONES else 0
+        nombre = str(row["nombre"])
 
-        col_info, col_radio = st.columns([5, 2])
-
-        with col_info:
-            st.markdown(
-                f"<div style='padding:10px 0 6px 0;'>"
-                f"<div class=\'alumno-nombre\'>{row['nombre']}</div>"
-                f"<div class=\'alumno-ci\'>{ci_text}</div>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-        with col_radio:
-            st.radio(
-                label="estado",
-                options=OPCIONES,
-                index=idx,
-                key=key,
-                horizontal=True,
-                label_visibility="collapsed",
-            )
-
-        st.markdown("<hr style='margin:1px 0;opacity:0.1'>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='font-size:15px;font-weight:700;color:#0f1117;"
+            f"text-transform:uppercase;padding:10px 0 0 0;letter-spacing:0.3px;'>{nombre}</div>"
+            f"<div style='font-size:12px;color:#666;margin-bottom:2px;'>{ci_text}</div>",
+            unsafe_allow_html=True,
+        )
+        st.radio(
+            label="estado",
+            options=OPCIONES,
+            index=idx,
+            key=key,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        st.markdown("<hr style='margin:6px 0;opacity:0.12'>", unsafe_allow_html=True)
 
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
     if st.button("💾 Guardar Asistencia", type="primary", use_container_width=True):

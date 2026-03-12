@@ -1,7 +1,7 @@
 """
 Sistema de Gestión de Asistencia Escolar - MEC Paraguay
-Versión 2.0 — Con importación PDF, botones P/A/J, exportación Excel,
-edición de estudiantes, logo e identidad institucional.
+Versión 2.1 — Login, botones P/A/J estilo card, exportación Excel,
+importación PDF, edición de estudiantes, logo institucional.
 """
 
 import streamlit as st
@@ -31,6 +31,64 @@ GRADOS = {
 }
 TODOS_LOS_GRADOS = [g for nivel in GRADOS.values() for g in nivel]
 ESTADOS = ["Presente", "Ausente Injustificado", "Ausente Justificado"]
+
+# ─────────────────────────────────────────────
+# LOGIN
+# ─────────────────────────────────────────────
+
+def pagina_login():
+    """Pantalla de inicio de sesión."""
+    st.markdown("""
+    <style>
+    .login-box {
+        max-width: 420px;
+        margin: 80px auto 0 auto;
+        background: #1e2130;
+        border-radius: 18px;
+        padding: 40px 36px 32px 36px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+    }
+    .login-title {
+        font-size: 26px;
+        font-weight: 700;
+        color: #ffffff;
+        text-align: center;
+        margin-bottom: 6px;
+    }
+    .login-sub {
+        font-size: 13px;
+        color: #8a8fa8;
+        text-align: center;
+        margin-bottom: 28px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+        st.markdown('<div class="login-title">🏫 Asistencia Escolar</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-sub">MEC Paraguay · Tercer Ciclo & Nivel Medio</div>', unsafe_allow_html=True)
+
+        usuario = st.text_input("👤 Usuario", placeholder="Ingresá tu usuario")
+        contrasena = st.text_input("🔒 Contraseña", type="password", placeholder="Ingresá tu contraseña")
+
+        if st.button("Ingresar", type="primary", use_container_width=True):
+            usuario_ok = st.secrets.get("app_usuario", "Lucasmen")
+            clave_ok   = st.secrets.get("app_password", "123456")
+            if usuario == usuario_ok and contrasena == clave_ok:
+                st.session_state["autenticado"] = True
+                st.rerun()
+            else:
+                st.error("❌ Usuario o contraseña incorrectos.")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+
+def verificar_login():
+    """Devuelve True si el usuario está autenticado."""
+    return st.session_state.get("autenticado", False)
+
 
 # ─────────────────────────────────────────────
 # CONEXIÓN BASE DE DATOS
@@ -98,17 +156,13 @@ def init_db():
                 UNIQUE(estudiante_id, fecha)
             );
         """)
-        # Agregar columna CI si no existe (migración)
-        cur.execute("""
-            ALTER TABLE estudiantes ADD COLUMN IF NOT EXISTS ci TEXT;
-        """)
+        cur.execute("ALTER TABLE estudiantes ADD COLUMN IF NOT EXISTS ci TEXT;")
         for nivel, lista in GRADOS.items():
             for grado in lista:
                 cur.execute(
                     "INSERT INTO grados (nombre, nivel) VALUES (%s, %s) ON CONFLICT (nombre) DO NOTHING",
                     (grado, nivel),
                 )
-        # Config defaults
         for clave, valor in [
             ("institucion_nombre", "Institución Educativa"),
             ("institucion_logo", ""),
@@ -151,7 +205,7 @@ def seed_mock_data():
                     if dia_actual.weekday() < 5:
                         estado = random.choices(ESTADOS, weights=[0.80, 0.12, 0.08], k=1)[0]
                         cur.execute(
-                            "INSERT INTO asistencia (estudiante_id, fecha, estado) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                            "INSERT INTO asistencia (estudiante_id, fecha, estado) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
                             (est_id, dia_actual, estado),
                         )
                         dias_sim += 1
@@ -163,16 +217,16 @@ def seed_mock_data():
 # CONFIG INSTITUCIONAL
 # ─────────────────────────────────────────────
 
-def get_config(clave: str) -> str:
+def get_config(clave):
     rows = run_query("SELECT valor FROM config WHERE clave = %s", (clave,))
     return rows[0]["valor"] if rows else ""
 
 
-def set_config(clave: str, valor: str):
+def set_config(clave, valor):
     conn = get_conn()
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO config (clave, valor) VALUES (%s, %s) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor",
+            "INSERT INTO config (clave,valor) VALUES (%s,%s) ON CONFLICT (clave) DO UPDATE SET valor=EXCLUDED.valor",
             (clave, valor),
         )
         conn.commit()
@@ -182,7 +236,7 @@ def set_config(clave: str, valor: str):
 # FUNCIONES DE DATOS
 # ─────────────────────────────────────────────
 
-def get_estudiantes_por_grado(grado_nombre: str) -> pd.DataFrame:
+def get_estudiantes_por_grado(grado_nombre):
     return run_df("""
         SELECT e.id, e.nombre, e.ci, e.contacto
         FROM estudiantes e JOIN grados g ON e.grado_id = g.id
@@ -190,9 +244,9 @@ def get_estudiantes_por_grado(grado_nombre: str) -> pd.DataFrame:
     """, (grado_nombre,))
 
 
-def get_asistencia_fecha(grado_nombre: str, fecha) -> pd.DataFrame:
+def get_asistencia_fecha(grado_nombre, fecha):
     return run_df("""
-        SELECT e.id as estudiante_id, e.nombre,
+        SELECT e.id as estudiante_id, e.nombre, e.ci,
                COALESCE(a.estado, 'Sin registro') as estado
         FROM estudiantes e JOIN grados g ON e.grado_id = g.id
         LEFT JOIN asistencia a ON a.estudiante_id = e.id AND a.fecha = %s
@@ -200,64 +254,63 @@ def get_asistencia_fecha(grado_nombre: str, fecha) -> pd.DataFrame:
     """, (fecha, grado_nombre))
 
 
-def guardar_asistencia(registros: list):
+def guardar_asistencia(registros):
     conn = get_conn()
     with conn.cursor() as cur:
         for est_id, fecha, estado in registros:
             cur.execute("""
-                INSERT INTO asistencia (estudiante_id, fecha, estado) VALUES (%s, %s, %s)
-                ON CONFLICT (estudiante_id, fecha) DO UPDATE SET estado = EXCLUDED.estado
+                INSERT INTO asistencia (estudiante_id, fecha, estado) VALUES (%s,%s,%s)
+                ON CONFLICT (estudiante_id, fecha) DO UPDATE SET estado=EXCLUDED.estado
             """, (est_id, fecha, estado))
         conn.commit()
 
 
-def get_resumen_grado(grado_nombre: str) -> pd.DataFrame:
+def get_resumen_grado(grado_nombre):
     return run_df("""
         SELECT e.nombre,
-               COUNT(CASE WHEN a.estado = 'Presente' THEN 1 END) as presentes,
-               COUNT(CASE WHEN a.estado = 'Ausente Injustificado' THEN 1 END) as inj,
-               COUNT(CASE WHEN a.estado = 'Ausente Justificado' THEN 1 END) as just,
+               COUNT(CASE WHEN a.estado='Presente' THEN 1 END) as presentes,
+               COUNT(CASE WHEN a.estado='Ausente Injustificado' THEN 1 END) as inj,
+               COUNT(CASE WHEN a.estado='Ausente Justificado' THEN 1 END) as just,
                COUNT(a.id) as total_dias
-        FROM estudiantes e JOIN grados g ON e.grado_id = g.id
-        LEFT JOIN asistencia a ON a.estudiante_id = e.id
-        WHERE g.nombre = %s
-        GROUP BY e.id, e.nombre ORDER BY e.nombre
+        FROM estudiantes e JOIN grados g ON e.grado_id=g.id
+        LEFT JOIN asistencia a ON a.estudiante_id=e.id
+        WHERE g.nombre=%s GROUP BY e.id, e.nombre ORDER BY e.nombre
     """, (grado_nombre,))
 
 
-def get_asistencia_rango(grado_nombre: str, fecha_ini, fecha_fin) -> pd.DataFrame:
+def get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin):
     return run_df("""
         SELECT e.nombre, e.ci, a.fecha, a.estado, g.nombre as grado
         FROM asistencia a
-        JOIN estudiantes e ON a.estudiante_id = e.id
-        JOIN grados g ON e.grado_id = g.id
-        WHERE g.nombre = %s AND a.fecha BETWEEN %s AND %s
+        JOIN estudiantes e ON a.estudiante_id=e.id
+        JOIN grados g ON e.grado_id=g.id
+        WHERE g.nombre=%s AND a.fecha BETWEEN %s AND %s
         ORDER BY e.nombre, a.fecha
     """, (grado_nombre, fecha_ini, fecha_fin))
 
 
-def detectar_faltas_consecutivas(grado_nombre=None) -> pd.DataFrame:
+def detectar_faltas_consecutivas(grado_nombre=None):
     filtro = "AND g.nombre = %s" if grado_nombre else ""
     params = (grado_nombre,) if grado_nombre else ()
     df = run_df(f"""
         SELECT e.id as estudiante_id, e.nombre, e.contacto, g.nombre as grado,
                a.fecha, a.estado
         FROM asistencia a
-        JOIN estudiantes e ON a.estudiante_id = e.id
-        JOIN grados g ON e.grado_id = g.id
+        JOIN estudiantes e ON a.estudiante_id=e.id
+        JOIN grados g ON e.grado_id=g.id
         WHERE a.estado LIKE 'Ausente%%' {filtro}
         ORDER BY e.id, a.fecha DESC
     """, params)
 
     if df.empty:
-        return pd.DataFrame(columns=["nombre", "grado", "contacto", "faltas_consecutivas", "desde"])
+        return pd.DataFrame(columns=["nombre","grado","contacto","faltas_consecutivas","desde"])
 
     resultados = []
     for est_id, grupo in df.groupby("estudiante_id"):
         fechas = sorted(pd.to_datetime(grupo["fecha"]).tolist(), reverse=True)
         racha = 1
         for i in range(1, len(fechas)):
-            diff = (fechas[i - 1] - fechas[i]).days
+            diff = (fechas[i-1] - fechas[i]).days
             if 1 <= diff <= 3:
                 racha += 1
             else:
@@ -276,11 +329,11 @@ def detectar_faltas_consecutivas(grado_nombre=None) -> pd.DataFrame:
 def agregar_estudiante(nombre, ci, grado_nombre, contacto):
     conn = get_conn()
     with conn.cursor() as cur:
-        cur.execute("SELECT id FROM grados WHERE nombre = %s", (grado_nombre,))
+        cur.execute("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
         row = cur.fetchone()
         if row:
             cur.execute(
-                "INSERT INTO estudiantes (nombre, ci, grado_id, contacto) VALUES (%s, %s, %s, %s)",
+                "INSERT INTO estudiantes (nombre,ci,grado_id,contacto) VALUES (%s,%s,%s,%s)",
                 (nombre.strip(), ci.strip(), row[0], contacto.strip()),
             )
             conn.commit()
@@ -289,11 +342,11 @@ def agregar_estudiante(nombre, ci, grado_nombre, contacto):
 def actualizar_estudiante(est_id, nombre, ci, grado_nombre, contacto):
     conn = get_conn()
     with conn.cursor() as cur:
-        cur.execute("SELECT id FROM grados WHERE nombre = %s", (grado_nombre,))
+        cur.execute("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
         row = cur.fetchone()
         if row:
             cur.execute(
-                "UPDATE estudiantes SET nombre=%s, ci=%s, grado_id=%s, contacto=%s WHERE id=%s",
+                "UPDATE estudiantes SET nombre=%s,ci=%s,grado_id=%s,contacto=%s WHERE id=%s",
                 (nombre.strip(), ci.strip(), row[0], contacto.strip(), est_id),
             )
             conn.commit()
@@ -302,8 +355,8 @@ def actualizar_estudiante(est_id, nombre, ci, grado_nombre, contacto):
 def eliminar_estudiante(est_id):
     conn = get_conn()
     with conn.cursor() as cur:
-        cur.execute("DELETE FROM asistencia WHERE estudiante_id = %s", (est_id,))
-        cur.execute("DELETE FROM estudiantes WHERE id = %s", (est_id,))
+        cur.execute("DELETE FROM asistencia WHERE estudiante_id=%s", (est_id,))
+        cur.execute("DELETE FROM estudiantes WHERE id=%s", (est_id,))
         conn.commit()
 
 
@@ -311,34 +364,22 @@ def eliminar_estudiante(est_id):
 # IMPORTACIÓN PDF
 # ─────────────────────────────────────────────
 
-def extraer_alumnos_pdf(pdf_bytes: bytes) -> pd.DataFrame:
-    """
-    Extrae alumnos de un PDF con tabla fija.
-    Busca columnas que contengan 'nombre' y 'ci' (insensible a mayúsculas).
-    """
+def extraer_alumnos_pdf(pdf_bytes):
     filas = []
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for pagina in pdf.pages:
-            tablas = pagina.extract_tables()
-            for tabla in tablas:
+            for tabla in (pagina.extract_tables() or []):
                 if not tabla:
                     continue
-                # Primera fila como encabezado
                 header = [str(c).lower().strip() if c else "" for c in tabla[0]]
-                # Detectar columnas de nombre y CI
-                col_nombre = next((i for i, h in enumerate(header) if "nombre" in h or "apellido" in h), None)
-                col_ci = next((i for i, h in enumerate(header) if "ci" in h or "cédula" in h or "cedula" in h or "documento" in h), None)
-
-                if col_nombre is None:
-                    # Si no hay header claro, asumir col 0 = nombre, col 1 = CI
-                    col_nombre, col_ci = 0, 1
-
+                col_nombre = next((i for i, h in enumerate(header) if "nombre" in h or "apellido" in h), 0)
+                col_ci = next((i for i, h in enumerate(header) if "ci" in h or "cédula" in h or "cedula" in h), 1)
                 for fila in tabla[1:]:
                     if not fila or not fila[col_nombre]:
                         continue
                     nombre = str(fila[col_nombre]).strip()
-                    ci = str(fila[col_ci]).strip() if col_ci is not None and fila[col_ci] else ""
-                    if nombre and nombre.lower() not in ("nombre", "apellido", "alumno", ""):
+                    ci = str(fila[col_ci]).strip() if col_ci < len(fila) and fila[col_ci] else ""
+                    if nombre and nombre.lower() not in ("nombre","apellido","alumno",""):
                         filas.append({"nombre": nombre, "ci": ci})
     return pd.DataFrame(filas)
 
@@ -347,101 +388,71 @@ def extraer_alumnos_pdf(pdf_bytes: bytes) -> pd.DataFrame:
 # EXPORTACIÓN EXCEL
 # ─────────────────────────────────────────────
 
-def generar_excel_resumen(grado_nombre: str, fecha_ini, fecha_fin, institucion: str) -> bytes:
+def generar_excel_resumen(grado_nombre, fecha_ini, fecha_fin, institucion):
     df = get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin)
     resumen = get_resumen_grado(grado_nombre)
-
     wb = openpyxl.Workbook()
-
-    # ── Hoja 1: Resumen general ──
     ws1 = wb.active
     ws1.title = "Resumen General"
 
-    # Estilos
-    header_fill = PatternFill("solid", fgColor="1F4E79")
-    header_font = Font(color="FFFFFF", bold=True, size=11)
-    title_font = Font(bold=True, size=14, color="1F4E79")
-    border = Border(
-        left=Side(style="thin"), right=Side(style="thin"),
-        top=Side(style="thin"), bottom=Side(style="thin")
-    )
-    verde = PatternFill("solid", fgColor="C6EFCE")
-    rojo = PatternFill("solid", fgColor="FFC7CE")
+    hfill  = PatternFill("solid", fgColor="1F4E79")
+    hfont  = Font(color="FFFFFF", bold=True, size=11)
+    tfont  = Font(bold=True, size=14, color="1F4E79")
+    brd    = Border(left=Side(style="thin"), right=Side(style="thin"),
+                    top=Side(style="thin"), bottom=Side(style="thin"))
+    verde  = PatternFill("solid", fgColor="C6EFCE")
+    rojo   = PatternFill("solid", fgColor="FFC7CE")
     amarillo = PatternFill("solid", fgColor="FFEB9C")
 
-    # Título
     ws1.merge_cells("A1:G1")
     ws1["A1"] = f"{institucion} — Registro de Asistencia"
-    ws1["A1"].font = title_font
+    ws1["A1"].font = tfont
     ws1["A1"].alignment = Alignment(horizontal="center")
 
     ws1.merge_cells("A2:G2")
-    ws1["A2"] = f"{grado_nombre}   |   Período: {fecha_ini.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}"
+    ws1["A2"] = f"{grado_nombre}   |   {fecha_ini.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}"
     ws1["A2"].alignment = Alignment(horizontal="center")
     ws1["A2"].font = Font(italic=True, size=10)
 
-    # Encabezados tabla
-    headers = ["Nombre", "CI", "Presentes", "F. Injustificadas", "F. Justificadas", "Días Registrados", "% Asistencia"]
-    for col_idx, h in enumerate(headers, 1):
-        cell = ws1.cell(row=4, column=col_idx, value=h)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center")
-        cell.border = border
+    for ci, h in enumerate(["Nombre","CI","Presentes","F. Injustificadas","F. Justificadas","Días","% Asistencia"], 1):
+        c = ws1.cell(row=4, column=ci, value=h)
+        c.fill = hfill; c.font = hfont
+        c.alignment = Alignment(horizontal="center"); c.border = brd
 
-    # Datos
     est_ci = run_df("SELECT e.nombre, e.ci FROM estudiantes e JOIN grados g ON e.grado_id=g.id WHERE g.nombre=%s ORDER BY e.nombre", (grado_nombre,))
     ci_map = dict(zip(est_ci["nombre"], est_ci["ci"])) if not est_ci.empty else {}
 
-    for row_idx, row in resumen.iterrows():
-        pct = round(row["presentes"] / row["total_dias"] * 100, 1) if row["total_dias"] > 0 else 0
-        valores = [
-            row["nombre"], ci_map.get(row["nombre"], ""),
-            row["presentes"], row["inj"], row["just"],
-            row["total_dias"], f"{pct}%"
-        ]
-        for col_idx, val in enumerate(valores, 1):
-            cell = ws1.cell(row=row_idx + 4, column=col_idx, value=val)
-            cell.border = border
-            cell.alignment = Alignment(horizontal="center" if col_idx > 1 else "left")
-            if col_idx == 7:
-                if pct >= 75:
-                    cell.fill = verde
-                else:
-                    cell.fill = rojo
+    for ri, row in resumen.iterrows():
+        pct = round(row["presentes"]/row["total_dias"]*100, 1) if row["total_dias"] > 0 else 0
+        for ci, val in enumerate([row["nombre"], ci_map.get(row["nombre"],""),
+                                   row["presentes"], row["inj"], row["just"],
+                                   row["total_dias"], f"{pct}%"], 1):
+            c = ws1.cell(row=ri+4, column=ci, value=val)
+            c.border = brd
+            c.alignment = Alignment(horizontal="left" if ci==1 else "center")
+            if ci == 7:
+                c.fill = verde if pct >= 75 else rojo
 
-    # Anchos de columna
-    anchos = [30, 12, 12, 18, 16, 16, 14]
-    for i, ancho in enumerate(anchos, 1):
-        ws1.column_dimensions[get_column_letter(i)].width = ancho
+    for i, w in enumerate([30,12,12,18,16,12,14], 1):
+        ws1.column_dimensions[get_column_letter(i)].width = w
 
-    # ── Hoja 2: Detalle de ausencias ──
     if not df.empty:
         ws2 = wb.create_sheet("Ausencias y Justificados")
-        ausencias = df[df["estado"] != "Presente"].copy()
-
-        headers2 = ["Fecha", "Nombre", "CI", "Grado", "Estado"]
-        for col_idx, h in enumerate(headers2, 1):
-            cell = ws2.cell(row=1, column=col_idx, value=h)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center")
-            cell.border = border
-
-        for row_idx, row in ausencias.iterrows():
-            valores = [
-                row["fecha"].strftime("%d/%m/%Y") if hasattr(row["fecha"], "strftime") else str(row["fecha"]),
-                row["nombre"], row.get("ci", ""), row["grado"], row["estado"]
-            ]
-            for col_idx, val in enumerate(valores, 1):
-                cell = ws2.cell(row=row_idx + 1, column=col_idx, value=val)
-                cell.border = border
-                cell.alignment = Alignment(horizontal="center" if col_idx != 2 else "left")
-                if col_idx == 5:
-                    cell.fill = rojo if "Injustificado" in str(val) else amarillo
-
-        for i, ancho in enumerate([14, 30, 12, 16, 22], 1):
-            ws2.column_dimensions[get_column_letter(i)].width = ancho
+        aus = df[df["estado"] != "Presente"].copy()
+        for ci, h in enumerate(["Fecha","Nombre","CI","Grado","Estado"], 1):
+            c = ws2.cell(row=1, column=ci, value=h)
+            c.fill = hfill; c.font = hfont
+            c.alignment = Alignment(horizontal="center"); c.border = brd
+        for ri, row in aus.iterrows():
+            fecha_str = row["fecha"].strftime("%d/%m/%Y") if hasattr(row["fecha"],"strftime") else str(row["fecha"])
+            for ci, val in enumerate([fecha_str, row["nombre"], row.get("ci",""), row["grado"], row["estado"]], 1):
+                c = ws2.cell(row=ri+1, column=ci, value=val)
+                c.border = brd
+                c.alignment = Alignment(horizontal="left" if ci==2 else "center")
+                if ci == 5:
+                    c.fill = rojo if "Injustificado" in str(val) else amarillo
+        for i, w in enumerate([14,30,12,16,22], 1):
+            ws2.column_dimensions[get_column_letter(i)].width = w
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -449,31 +460,81 @@ def generar_excel_resumen(grado_nombre: str, fecha_ini, fecha_fin, institucion: 
 
 
 # ─────────────────────────────────────────────
-# CSS TABLET
+# CSS
 # ─────────────────────────────────────────────
 
 def inject_css():
     st.markdown("""
     <style>
-    html, body, [class*="css"] { font-size: 17px !important; }
+    html, body, [class*="css"] { font-size: 16px !important; }
+
+    /* ── Card alumno ── */
+    .alumno-card {
+        background: #1e2130;
+        border-radius: 14px;
+        padding: 14px 18px;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    }
+    .alumno-info { flex: 1; }
+    .alumno-nombre {
+        font-size: 15px;
+        font-weight: 700;
+        color: #f0f2f6;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    .alumno-ci { font-size: 12px; color: #8a8fa8; margin-top: 2px; }
+
+    /* ── Botones P/A/J circulares ── */
+    .paj-btns {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    .paj-btn {
+        width: 44px; height: 44px;
+        border-radius: 50%;
+        border: 2px solid;
+        font-weight: 700;
+        font-size: 16px;
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: all 0.15s;
+        flex-shrink: 0;
+    }
+    .paj-P-off { border-color:#2ecc71; color:#2ecc71; background:transparent; }
+    .paj-P-on  { border-color:#2ecc71; color:#fff;    background:#2ecc71; }
+    .paj-A-off { border-color:#e74c3c; color:#e74c3c; background:transparent; }
+    .paj-A-on  { border-color:#e74c3c; color:#fff;    background:#e74c3c; }
+    .paj-J-off { border-color:#f39c12; color:#f39c12; background:transparent; }
+    .paj-J-on  { border-color:#f39c12; color:#fff;    background:#f39c12; }
+
+    /* ── Botones streamlit generales ── */
     .stButton > button {
-        min-height: 48px !important; font-size: 15px !important;
-        border-radius: 10px !important; padding: 8px 16px !important;
+        min-height: 48px !important;
+        font-size: 15px !important;
+        border-radius: 10px !important;
     }
-    /* Botones P / A / J */
-    .btn-p button { background-color: #2ecc71 !important; color: white !important; font-weight: bold !important; font-size: 18px !important; min-height: 52px !important; border-radius: 10px !important; }
-    .btn-a button { background-color: #e74c3c !important; color: white !important; font-weight: bold !important; font-size: 18px !important; min-height: 52px !important; border-radius: 10px !important; }
-    .btn-j button { background-color: #f39c12 !important; color: white !important; font-weight: bold !important; font-size: 18px !important; min-height: 52px !important; border-radius: 10px !important; }
-    .stSelectbox > div > div, .stDateInput > div > div > input {
-        min-height: 48px !important; font-size: 16px !important; border-radius: 8px !important;
+    .stSelectbox > div > div,
+    .stDateInput > div > div > input {
+        min-height: 48px !important;
+        font-size: 15px !important;
+        border-radius: 8px !important;
     }
-    .stTextInput > div > div > input { min-height: 48px !important; font-size: 16px !important; border-radius: 8px !important; }
-    .stRadio > div { gap: 6px !important; }
-    .stRadio label { font-size: 16px !important; padding: 10px 12px !important; border-radius: 8px !important; }
-    .stTabs [data-baseweb="tab"] { min-height: 48px !important; font-size: 15px !important; padding: 10px 18px !important; }
+    .stTextInput > div > div > input {
+        min-height: 48px !important;
+        font-size: 15px !important;
+        border-radius: 8px !important;
+    }
+    .stRadio label { font-size: 15px !important; padding: 8px 10px !important; border-radius: 8px !important; }
+    .stTabs [data-baseweb="tab"] { min-height: 46px !important; font-size: 14px !important; }
     [data-testid="metric-container"] [data-testid="stMetricValue"] { font-size: 26px !important; }
     [data-testid="stSidebar"] { min-width: 240px !important; }
-    .main .block-container { padding-top: 1.5rem !important; padding-bottom: 3rem !important; max-width: 1100px; }
+    .main .block-container { padding-top: 1.2rem !important; padding-bottom: 3rem !important; max-width: 1100px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -495,64 +556,84 @@ def pagina_pasar_lista():
         st.warning(f"⚠️ No hay estudiantes en **{grado_sel}**.")
         return
 
-    # Inicializar estados en session_state
+    # Inicializar estados
     for _, row in df.iterrows():
         key = f"est_{row['estudiante_id']}"
         if key not in st.session_state:
-            e = row["estado"] if row["estado"] in ESTADOS else "Presente"
-            st.session_state[key] = e
+            st.session_state[key] = row["estado"] if row["estado"] in ESTADOS else "Presente"
 
     st.markdown(f"**{len(df)} estudiantes** — {grado_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
 
-    # Botón marcar todos presentes
     if st.button("✅ Marcar todos Presentes"):
         for _, row in df.iterrows():
             st.session_state[f"est_{row['estudiante_id']}"] = "Presente"
         st.rerun()
 
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+    # Mapa de estado → letra
+    ESTADO_LETRA = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
+    LETRA_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
 
-    ICONO = {"Presente": "🟢", "Ausente Injustificado": "🔴", "Ausente Justificado": "🟡", "Sin registro": "⚪"}
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
     for _, row in df.iterrows():
         key = f"est_{row['estudiante_id']}"
         estado_actual = st.session_state.get(key, "Presente")
+        letra_actual = ESTADO_LETRA.get(estado_actual, "P")
+        ci_text = row.get("ci", "") or ""
 
-        st.markdown(
-            f"<div style='font-size:17px;font-weight:600;padding:8px 0 4px 0;'>"
-            f"{ICONO.get(estado_actual,'⚪')} {row['nombre']}</div>",
-            unsafe_allow_html=True,
-        )
+        # Card con HTML + botones Streamlit superpuestos
+        p_on = "paj-P-on" if letra_actual == "P" else "paj-P-off"
+        a_on = "paj-A-on" if letra_actual == "A" else "paj-A-off"
+        j_on = "paj-J-on" if letra_actual == "J" else "paj-J-off"
 
-        col_p, col_a, col_j = st.columns(3)
+        col_info, col_p, col_a, col_j = st.columns([5, 1, 1, 1])
+
+        with col_info:
+            st.markdown(
+                f"""<div style='padding:10px 0 6px 0;'>
+                <div class='alumno-nombre'>{row['nombre']}</div>
+                <div class='alumno-ci'>{ci_text}</div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
 
         with col_p:
-            st.markdown('<div class="btn-p">', unsafe_allow_html=True)
-            if st.button("P  Presente", key=f"p_{row['estudiante_id']}"):
+            btn_style = "background:#2ecc71;color:white;" if letra_actual=="P" else "background:transparent;color:#2ecc71;"
+            st.markdown(
+                f"<style>#btn_p_{row['estudiante_id']} button{{border-radius:50%!important;width:48px!important;height:48px!important;padding:0!important;font-weight:700!important;font-size:17px!important;border:2px solid #2ecc71!important;{btn_style}}}</style>",
+                unsafe_allow_html=True,
+            )
+            if st.button("P", key=f"p_{row['estudiante_id']}", help="Presente"):
                 st.session_state[key] = "Presente"
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
         with col_a:
-            st.markdown('<div class="btn-a">', unsafe_allow_html=True)
-            if st.button("A  Ausente", key=f"a_{row['estudiante_id']}"):
+            btn_style = "background:#e74c3c;color:white;" if letra_actual=="A" else "background:transparent;color:#e74c3c;"
+            st.markdown(
+                f"<style>#btn_a_{row['estudiante_id']} button{{border-radius:50%!important;width:48px!important;height:48px!important;padding:0!important;font-weight:700!important;font-size:17px!important;border:2px solid #e74c3c!important;{btn_style}}}</style>",
+                unsafe_allow_html=True,
+            )
+            if st.button("A", key=f"a_{row['estudiante_id']}", help="Ausente"):
                 st.session_state[key] = "Ausente Injustificado"
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
         with col_j:
-            st.markdown('<div class="btn-j">', unsafe_allow_html=True)
-            if st.button("J  Justificado", key=f"j_{row['estudiante_id']}"):
+            btn_style = "background:#f39c12;color:white;" if letra_actual=="J" else "background:transparent;color:#f39c12;"
+            st.markdown(
+                f"<style>#btn_j_{row['estudiante_id']} button{{border-radius:50%!important;width:48px!important;height:48px!important;padding:0!important;font-weight:700!important;font-size:17px!important;border:2px solid #f39c12!important;{btn_style}}}</style>",
+                unsafe_allow_html=True,
+            )
+            if st.button("J", key=f"j_{row['estudiante_id']}", help="Justificado"):
                 st.session_state[key] = "Ausente Justificado"
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown("<hr style='margin:4px 0;opacity:0.12'>", unsafe_allow_html=True)
+        st.markdown("<hr style='margin:2px 0;opacity:0.1'>", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
     if st.button("💾 Guardar Asistencia", type="primary", use_container_width=True):
         registros = [
-            (row["estudiante_id"], fecha_sel, st.session_state.get(f"est_{row['estudiante_id']}", "Presente"))
+            (row["estudiante_id"], fecha_sel,
+             st.session_state.get(f"est_{row['estudiante_id']}", "Presente"))
             for _, row in df.iterrows()
         ]
         guardar_asistencia(registros)
@@ -578,10 +659,10 @@ def pagina_resumen():
         return
 
     total_reg = df["total_dias"].sum()
-    total_p = df["presentes"].sum()
+    total_p   = df["presentes"].sum()
     total_inj = df["inj"].sum()
-    total_just = df["just"].sum()
-    pct = round((total_p / total_reg) * 100, 1) if total_reg else 0
+    total_just= df["just"].sum()
+    pct = round((total_p/total_reg)*100, 1) if total_reg else 0
 
     col1, col2 = st.columns(2)
     col1.metric("👥 Estudiantes", len(df))
@@ -595,51 +676,47 @@ def pagina_resumen():
     with col_pie:
         st.subheader("Distribución")
         fig = px.pie(
-            names=["Presentes", "Inj.", "Just."],
+            names=["Presentes","Inj.","Just."],
             values=[total_p, total_inj, total_just],
-            color_discrete_sequence=["#2ecc71", "#e74c3c", "#f39c12"], hole=0.4,
+            color_discrete_sequence=["#2ecc71","#e74c3c","#f39c12"], hole=0.4,
         )
         fig.update_traces(textposition="inside", textinfo="percent+label")
-        fig.update_layout(showlegend=False, margin=dict(t=10, b=10))
+        fig.update_layout(showlegend=False, margin=dict(t=10,b=10))
         st.plotly_chart(fig, use_container_width=True)
 
     with col_bar:
         st.subheader("Por Estudiante")
-        df_plot = df.copy()
-        df_plot["% Asistencia"] = (df_plot["presentes"] / df_plot["total_dias"] * 100).round(1)
-        fig2 = px.bar(df_plot, x="nombre", y="% Asistencia", color="% Asistencia",
-                      color_continuous_scale=["#e74c3c", "#f39c12", "#2ecc71"], range_color=[0, 100])
-        fig2.update_layout(xaxis_tickangle=-35, coloraxis_showscale=False, margin=dict(t=10, b=80))
+        df_p = df.copy()
+        df_p["% Asistencia"] = (df_p["presentes"]/df_p["total_dias"]*100).round(1)
+        fig2 = px.bar(df_p, x="nombre", y="% Asistencia", color="% Asistencia",
+                      color_continuous_scale=["#e74c3c","#f39c12","#2ecc71"], range_color=[0,100])
+        fig2.update_layout(xaxis_tickangle=-35, coloraxis_showscale=False, margin=dict(t=10,b=80))
         fig2.add_hline(y=75, line_dash="dash", line_color="red", annotation_text="Mínimo 75%")
         st.plotly_chart(fig2, use_container_width=True)
 
     st.subheader("📋 Detalle")
-    df_t = df.rename(columns={"nombre": "Nombre", "presentes": "Presentes",
-                               "inj": "F. Injustificadas", "just": "F. Justificadas", "total_dias": "Días"})
-    df_t["% Asistencia"] = (df_t["Presentes"] / df_t["Días"] * 100).round(1).astype(str) + "%"
+    df_t = df.rename(columns={"nombre":"Nombre","presentes":"Presentes",
+                               "inj":"F. Injustificadas","just":"F. Justificadas","total_dias":"Días"})
+    df_t["% Asistencia"] = (df_t["Presentes"]/df_t["Días"]*100).round(1).astype(str)+"%"
     st.dataframe(df_t, use_container_width=True, hide_index=True)
 
-    # Exportar Excel
     st.divider()
     st.subheader("📥 Exportar a Excel")
-    periodo = st.radio("Período", ["Día", "Semana", "Mes", "Personalizado"], horizontal=True)
+    periodo = st.radio("Período", ["Día","Semana","Mes","Personalizado"], horizontal=True)
     hoy = date.today()
     if periodo == "Día":
         f_ini, f_fin = hoy, hoy
     elif periodo == "Semana":
-        f_ini = hoy - timedelta(days=hoy.weekday())
-        f_fin = hoy
+        f_ini = hoy - timedelta(days=hoy.weekday()); f_fin = hoy
     elif periodo == "Mes":
-        f_ini = hoy.replace(day=1)
-        f_fin = hoy
+        f_ini = hoy.replace(day=1); f_fin = hoy
     else:
         f_ini, f_fin = fecha_ini, fecha_fin
 
     if st.button("📊 Generar Excel", type="primary"):
         excel_bytes = generar_excel_resumen(grado_sel, f_ini, f_fin, institucion)
         st.download_button(
-            label="⬇️ Descargar Excel",
-            data=excel_bytes,
+            "⬇️ Descargar Excel", data=excel_bytes,
             file_name=f"asistencia_{grado_sel.replace('°','').replace(' ','_')}_{f_ini}_{f_fin}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
@@ -649,23 +726,23 @@ def pagina_alertas():
     st.header("🚨 Alertas de Faltas Consecutivas")
     st.caption(f"Estudiantes con **{UMBRAL_FALTAS_CONSECUTIVAS} o más faltas consecutivas**.")
 
-    filtro = st.selectbox("Filtrar por Grado", ["Todos los grados"] + TODOS_LOS_GRADOS, key="alerta_grado")
-    df = detectar_faltas_consecutivas(None if filtro == "Todos los grados" else filtro)
+    filtro = st.selectbox("Filtrar por Grado", ["Todos los grados"]+TODOS_LOS_GRADOS, key="alerta_grado")
+    df = detectar_faltas_consecutivas(None if filtro=="Todos los grados" else filtro)
 
     if df.empty:
-        st.success("✅ ¡Sin alertas! Ningún estudiante tiene faltas consecutivas.")
+        st.success("✅ ¡Sin alertas!")
         return
 
     st.error(f"⚠️ **{len(df)} estudiante(s)** requieren atención:")
     st.divider()
     for _, row in df.iterrows():
-        col1, col2 = st.columns([3, 2])
-        with col1:
+        c1, c2 = st.columns([3,2])
+        with c1:
             st.markdown(f"### 👤 {row['nombre']}")
             st.markdown(f"📚 **Grado:** {row['grado']}")
             st.markdown(f"📅 **Faltas consecutivas:** `{row['faltas_consecutivas']} días`")
             st.markdown(f"🗓️ **Desde:** {row['desde']}")
-        with col2:
+        with c2:
             st.markdown("### 📞 Contacto")
             st.info(f"**{row['contacto']}**")
         st.divider()
@@ -677,51 +754,46 @@ def pagina_alertas():
 
 def pagina_gestion():
     st.header("🎓 Gestión de Estudiantes")
-    tabs = st.tabs(["➕ Agregar", "📥 Importar PDF", "✏️ Editar / Mover", "🗑️ Eliminar"])
+    tabs = st.tabs(["➕ Agregar","📥 Importar PDF","✏️ Editar / Mover","🗑️ Eliminar"])
 
-    # ── Tab 1: Agregar individual ──
     with tabs[0]:
         with st.form("form_agregar"):
-            nombre = st.text_input("Nombre y apellido")
-            ci = st.text_input("CI (Cédula de Identidad)")
-            grado_sel = st.selectbox("Grado", TODOS_LOS_GRADOS)
+            nombre   = st.text_input("Nombre y apellido")
+            ci       = st.text_input("CI (Cédula de Identidad)")
+            grado_s  = st.selectbox("Grado", TODOS_LOS_GRADOS)
             contacto = st.text_input("Contacto padre/tutor (opcional)")
             if st.form_submit_button("Agregar Estudiante", type="primary"):
                 if nombre.strip():
-                    agregar_estudiante(nombre, ci, grado_sel, contacto)
-                    st.success(f"✅ **{nombre}** agregado a {grado_sel}.")
+                    agregar_estudiante(nombre, ci, grado_s, contacto)
+                    st.success(f"✅ **{nombre}** agregado a {grado_s}.")
                 else:
                     st.error("⚠️ El nombre no puede estar vacío.")
 
-    # ── Tab 2: Importar PDF ──
     with tabs[1]:
         st.subheader("📥 Importar listado desde PDF")
-        st.info("El PDF debe tener una tabla con columnas de **Nombre** y **CI**. Los contactos se pueden agregar después.")
-
+        st.info("El PDF debe tener tabla con columnas **Nombre** y **CI**.")
         grado_import = st.selectbox("Grado destino", TODOS_LOS_GRADOS, key="grado_import")
         pdf_file = st.file_uploader("Subir PDF", type=["pdf"])
-
         if pdf_file:
             try:
-                df_preview = extraer_alumnos_pdf(pdf_file.read())
-                if df_preview.empty:
-                    st.error("❌ No se encontraron alumnos en el PDF. Verificá que tenga una tabla con columnas de Nombre y CI.")
+                df_prev = extraer_alumnos_pdf(pdf_file.read())
+                if df_prev.empty:
+                    st.error("❌ No se encontraron alumnos. Verificá que el PDF tenga tabla con Nombre y CI.")
                 else:
-                    st.success(f"✅ Se encontraron **{len(df_preview)} alumnos**. Verificá antes de importar:")
-                    st.dataframe(df_preview, use_container_width=True, hide_index=True)
-
+                    st.success(f"✅ **{len(df_prev)} alumnos** encontrados. Verificá:")
+                    st.dataframe(df_prev, use_container_width=True, hide_index=True)
                     if st.button("📥 Confirmar Importación", type="primary"):
                         conn = get_conn()
                         with conn.cursor() as cur:
-                            cur.execute("SELECT id FROM grados WHERE nombre = %s", (grado_import,))
-                            grado_row = cur.fetchone()
-                            if grado_row:
+                            cur.execute("SELECT id FROM grados WHERE nombre=%s", (grado_import,))
+                            gr = cur.fetchone()
+                            if gr:
                                 count = 0
-                                for _, r in df_preview.iterrows():
+                                for _, r in df_prev.iterrows():
                                     if r["nombre"].strip():
                                         cur.execute(
-                                            "INSERT INTO estudiantes (nombre, ci, grado_id) VALUES (%s, %s, %s)",
-                                            (r["nombre"].strip(), r.get("ci", ""), grado_row[0]),
+                                            "INSERT INTO estudiantes (nombre,ci,grado_id) VALUES (%s,%s,%s)",
+                                            (r["nombre"].strip(), r.get("ci",""), gr[0]),
                                         )
                                         count += 1
                                 conn.commit()
@@ -729,60 +801,52 @@ def pagina_gestion():
             except Exception as e:
                 st.error(f"❌ Error al leer el PDF: {e}")
 
-    # ── Tab 3: Editar / Mover ──
     with tabs[2]:
         st.subheader("✏️ Editar datos o mover de grado")
         grado_ver = st.selectbox("Ver estudiantes de", TODOS_LOS_GRADOS, key="editar_grado")
         df_est = get_estudiantes_por_grado(grado_ver)
-
         if df_est.empty:
             st.info(f"No hay estudiantes en {grado_ver}.")
         else:
-            alumno_nombres = df_est["nombre"].tolist()
-            alumno_sel = st.selectbox("Seleccionar alumno", alumno_nombres, key="alumno_editar")
-            alumno_row = df_est[df_est["nombre"] == alumno_sel].iloc[0]
-
+            alumno_sel = st.selectbox("Seleccionar alumno", df_est["nombre"].tolist(), key="alumno_editar")
+            ar = df_est[df_est["nombre"]==alumno_sel].iloc[0]
             with st.form("form_editar"):
-                nuevo_nombre = st.text_input("Nombre", value=alumno_row["nombre"])
-                nuevo_ci = st.text_input("CI", value=alumno_row.get("ci", "") or "")
-                nuevo_grado = st.selectbox("Grado", TODOS_LOS_GRADOS,
-                                           index=TODOS_LOS_GRADOS.index(grado_ver))
-                nuevo_contacto = st.text_input("Contacto", value=alumno_row.get("contacto", "") or "")
+                nn = st.text_input("Nombre", value=ar["nombre"])
+                nc = st.text_input("CI", value=ar.get("ci","") or "")
+                ng = st.selectbox("Grado", TODOS_LOS_GRADOS, index=TODOS_LOS_GRADOS.index(grado_ver))
+                nco= st.text_input("Contacto", value=ar.get("contacto","") or "")
                 if st.form_submit_button("💾 Guardar Cambios", type="primary"):
-                    actualizar_estudiante(alumno_row["id"], nuevo_nombre, nuevo_ci, nuevo_grado, nuevo_contacto)
-                    st.success(f"✅ Datos de **{nuevo_nombre}** actualizados.")
+                    actualizar_estudiante(ar["id"], nn, nc, ng, nco)
+                    st.success(f"✅ Datos de **{nn}** actualizados.")
                     st.rerun()
 
-    # ── Tab 4: Eliminar ──
     with tabs[3]:
         st.subheader("🗑️ Eliminar estudiante")
         grado_del = st.selectbox("Grado", TODOS_LOS_GRADOS, key="del_grado")
         df_del = get_estudiantes_por_grado(grado_del)
-
         if df_del.empty:
             st.info(f"No hay estudiantes en {grado_del}.")
         else:
             for _, row in df_del.iterrows():
-                col1, col2, col3 = st.columns([3, 2, 1])
-                col1.write(f"👤 {row['nombre']}")
-                col2.write(f"🪪 {row.get('ci', '') or '—'}")
-                if col3.button("🗑️", key=f"del_{row['id']}"):
+                c1, c2, c3 = st.columns([3,2,1])
+                c1.write(f"👤 {row['nombre']}")
+                c2.write(f"🪪 {row.get('ci','') or '—'}")
+                if c3.button("🗑️", key=f"del_{row['id']}"):
                     eliminar_estudiante(row["id"])
                     st.rerun()
 
 
 def pagina_configuracion():
     st.header("⚙️ Configuración Institucional")
-
     nombre_actual = get_config("institucion_nombre")
-    logo_actual = get_config("institucion_logo")
+    logo_actual   = get_config("institucion_logo")
 
     with st.form("form_config"):
-        st.subheader("🏫 Identidad de la institución")
-        nuevo_nombre = st.text_input("Nombre de la institución", value=nombre_actual)
+        st.subheader("🏫 Nombre de la institución")
+        nuevo_nombre = st.text_input("Nombre", value=nombre_actual)
 
         st.subheader("🖼️ Logo institucional")
-        logo_file = st.file_uploader("Subir logo (PNG o JPG, máx. 1MB)", type=["png", "jpg", "jpeg"])
+        logo_file = st.file_uploader("Subir logo (PNG/JPG)", type=["png","jpg","jpeg"])
         if logo_actual:
             st.markdown("**Logo actual:**")
             st.markdown(
@@ -790,11 +854,10 @@ def pagina_configuracion():
                 unsafe_allow_html=True,
             )
 
-        if st.form_submit_button("💾 Guardar Configuración", type="primary"):
+        if st.form_submit_button("💾 Guardar", type="primary"):
             set_config("institucion_nombre", nuevo_nombre.strip())
             if logo_file:
-                logo_b64 = base64.b64encode(logo_file.read()).decode("utf-8")
-                set_config("institucion_logo", logo_b64)
+                set_config("institucion_logo", base64.b64encode(logo_file.read()).decode("utf-8"))
             st.success("✅ Configuración guardada.")
             st.rerun()
 
@@ -810,6 +873,12 @@ def main():
         layout="wide",
     )
 
+    # ── LOGIN ──
+    if not verificar_login():
+        pagina_login()
+        st.stop()
+
+    # ── APP ──
     try:
         init_db()
         seed_mock_data()
@@ -819,12 +888,10 @@ def main():
 
     inject_css()
 
-    # Cargar config institucional
     institucion_nombre = get_config("institucion_nombre")
     logo_b64 = get_config("institucion_logo")
 
     with st.sidebar:
-        # Logo institucional o bandera Paraguay
         if logo_b64:
             st.markdown(
                 f'<img src="data:image/png;base64,{logo_b64}" style="max-height:80px;border-radius:8px;margin-bottom:8px;">',
@@ -839,8 +906,8 @@ def main():
 
         pagina = st.radio(
             "Navegación",
-            ["📋 Pasar Lista", "📊 Resumen por Grado", "🚨 Alertas de Faltas",
-             "🎓 Gestión de Estudiantes", "⚙️ Configuración"],
+            ["📋 Pasar Lista","📊 Resumen por Grado","🚨 Alertas de Faltas",
+             "🎓 Gestión de Estudiantes","⚙️ Configuración"],
             label_visibility="collapsed",
         )
 
@@ -850,6 +917,11 @@ def main():
         n_reg = run_df("SELECT COUNT(*) as c FROM asistencia")["c"][0]
         st.metric("Total Estudiantes", n_est)
         st.metric("Registros de Asistencia", n_reg)
+
+        st.divider()
+        if st.button("🚪 Cerrar sesión"):
+            st.session_state["autenticado"] = False
+            st.rerun()
 
     if pagina == "📋 Pasar Lista":
         pagina_pasar_lista()

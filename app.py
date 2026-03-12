@@ -26,8 +26,8 @@ UMBRAL_FALTAS_CONSECUTIVAS = 2
 
 GRADOS = {
     "Tercer Ciclo": ["7° Grado", "8° Grado", "9° Grado"],
-    "Nivel Medio - BTS": ["1° BTS", "2° BTS", "3° BTS"],
-    "Nivel Medio - BTC": ["1° BTC", "2° BTC", "3° BTC"],
+    "Nivel Medio - BTS": ["1° BTS"],
+    "Nivel Medio - BC":  ["1° BC", "2° BC", "3° BC"],
     "Nivel Medio - BTI": ["1° BTI", "2° BTI", "3° BTI"],
 }
 TODOS_LOS_GRADOS = [g for nivel in GRADOS.values() for g in nivel]
@@ -196,9 +196,13 @@ def init_db():
         for nivel, lista in GRADOS.items():
             for grado in lista:
                 cur.execute(
-                    "INSERT INTO grados (nombre, nivel) VALUES (%s, %s) ON CONFLICT (nombre) DO NOTHING",
+                    "INSERT INTO grados (nombre, nivel) VALUES (%s, %s) ON CONFLICT (nombre) DO UPDATE SET nivel=EXCLUDED.nivel",
                     (grado, nivel),
                 )
+        # Renombrar BTC → BC en registros existentes
+        cur.execute("UPDATE grados SET nombre=REPLACE(nombre,'BTC','BC'), nivel=REPLACE(nivel,'BTC','BC') WHERE nombre LIKE '%%BTC%%'")
+        # Actualizar estudiantes que tenían grados BTC
+        cur.execute("UPDATE estudiantes SET grado_id=g_new.id FROM grados g_new WHERE g_new.nombre = REPLACE((SELECT nombre FROM grados WHERE id=grado_id),'BTC','BC') AND (SELECT nombre FROM grados WHERE id=grado_id) LIKE '%%BTC%%'")
         for clave, valor in [
             ("institucion_nombre", "Institución Educativa"),
             ("institucion_logo", ""),
@@ -364,26 +368,33 @@ def detectar_faltas_consecutivas(grado_nombre=None):
 
 def agregar_estudiante(nombre, ci, grado_nombre, contacto):
     conn = get_conn()
+    nombre   = (nombre   or "").strip()
+    ci       = (ci       or "").strip()
+    contacto = (contacto or "").strip()
     with conn.cursor() as cur:
         cur.execute("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
         row = cur.fetchone()
         if row:
             cur.execute(
                 "INSERT INTO estudiantes (nombre,ci,grado_id,contacto) VALUES (%s,%s,%s,%s)",
-                (nombre.strip(), ci.strip(), row[0], contacto.strip()),
+                (nombre, ci, row[0], contacto),
             )
             conn.commit()
 
 
 def actualizar_estudiante(est_id, nombre, ci, grado_nombre, contacto):
     conn = get_conn()
+    # Limpiar campos de forma segura (pueden llegar None)
+    nombre   = (nombre   or "").strip()
+    ci       = (ci       or "").strip()
+    contacto = (contacto or "").strip()
     with conn.cursor() as cur:
         cur.execute("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
         row = cur.fetchone()
         if row:
             cur.execute(
                 "UPDATE estudiantes SET nombre=%s,ci=%s,grado_id=%s,contacto=%s WHERE id=%s",
-                (nombre.strip(), ci.strip(), row[0], contacto.strip(), est_id),
+                (nombre, ci, row[0], contacto, est_id),
             )
             conn.commit()
 

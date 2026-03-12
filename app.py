@@ -545,6 +545,50 @@ def inject_css():
 
 def pagina_pasar_lista():
     st.header("📋 Pasar Lista")
+
+    # CSS: radio buttons → círculos P/A/J sin recarga de página
+    st.markdown("""
+    <style>
+    div[data-testid="stRadio"] > label { display:none !important; }
+    div[data-testid="stRadio"] > div {
+        flex-direction: row !important;
+        gap: 8px !important;
+        align-items: center !important;
+        margin-top: 6px !important;
+    }
+    div[data-testid="stRadio"] > div > label {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 44px !important; height: 44px !important;
+        border-radius: 50% !important;
+        font-weight: 700 !important; font-size: 15px !important;
+        cursor: pointer !important;
+        padding: 0 !important; margin: 0 !important;
+        transition: all 0.12s !important;
+    }
+    div[data-testid="stRadio"] > div > label > div:first-child { display:none !important; }
+    div[data-testid="stRadio"] > div > label:nth-child(1) {
+        border: 2px solid #2ecc71 !important; color: #2ecc71 !important; background: transparent !important;
+    }
+    div[data-testid="stRadio"] > div > label:nth-child(2) {
+        border: 2px solid #e74c3c !important; color: #e74c3c !important; background: transparent !important;
+    }
+    div[data-testid="stRadio"] > div > label:nth-child(3) {
+        border: 2px solid #f39c12 !important; color: #f39c12 !important; background: transparent !important;
+    }
+    div[data-testid="stRadio"] > div > label:nth-child(1):has(input:checked) {
+        background: #2ecc71 !important; color: #fff !important;
+    }
+    div[data-testid="stRadio"] > div > label:nth-child(2):has(input:checked) {
+        background: #e74c3c !important; color: #fff !important;
+    }
+    div[data-testid="stRadio"] > div > label:nth-child(3):has(input:checked) {
+        background: #f39c12 !important; color: #fff !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     col1, col2 = st.columns([2, 1])
     with col1:
         grado_sel = st.selectbox("Grado", TODOS_LOS_GRADOS, key="lista_grado")
@@ -556,84 +600,61 @@ def pagina_pasar_lista():
         st.warning(f"⚠️ No hay estudiantes en **{grado_sel}**.")
         return
 
-    # Inicializar estados
-    for _, row in df.iterrows():
-        key = f"est_{row['estudiante_id']}"
-        if key not in st.session_state:
-            st.session_state[key] = row["estado"] if row["estado"] in ESTADOS else "Presente"
+    OPCIONES = ["P", "A", "J"]
+    ESTADO_A_OPCION = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
+    OPCION_A_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
+
+    # Cargar estados desde BD solo cuando cambia grado o fecha
+    cache_key = f"cache_{grado_sel}_{fecha_sel}"
+    if st.session_state.get("lista_cache_key") != cache_key:
+        for _, row in df.iterrows():
+            e = row["estado"] if row["estado"] in ESTADOS else "Presente"
+            st.session_state[f"est_{row['estudiante_id']}"] = ESTADO_A_OPCION.get(e, "P")
+        st.session_state["lista_cache_key"] = cache_key
 
     st.markdown(f"**{len(df)} estudiantes** — {grado_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
 
     if st.button("✅ Marcar todos Presentes"):
         for _, row in df.iterrows():
-            st.session_state[f"est_{row['estudiante_id']}"] = "Presente"
+            st.session_state[f"est_{row['estudiante_id']}"] = "P"
         st.rerun()
 
-    # Mapa de estado → letra
-    ESTADO_LETRA = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
-    LETRA_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
-
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
     for _, row in df.iterrows():
         key = f"est_{row['estudiante_id']}"
-        estado_actual = st.session_state.get(key, "Presente")
-        letra_actual = ESTADO_LETRA.get(estado_actual, "P")
         ci_text = row.get("ci", "") or ""
+        opcion_actual = st.session_state.get(key, "P")
+        idx = OPCIONES.index(opcion_actual) if opcion_actual in OPCIONES else 0
 
-        # Card con HTML + botones Streamlit superpuestos
-        p_on = "paj-P-on" if letra_actual == "P" else "paj-P-off"
-        a_on = "paj-A-on" if letra_actual == "A" else "paj-A-off"
-        j_on = "paj-J-on" if letra_actual == "J" else "paj-J-off"
-
-        col_info, col_p, col_a, col_j = st.columns([5, 1, 1, 1])
+        col_info, col_radio = st.columns([5, 2])
 
         with col_info:
             st.markdown(
-                f"""<div style='padding:10px 0 6px 0;'>
-                <div class='alumno-nombre'>{row['nombre']}</div>
-                <div class='alumno-ci'>{ci_text}</div>
-                </div>""",
+                f"<div style='padding:10px 0 6px 0;'>"
+                f"<div class=\'alumno-nombre\'>{row['nombre']}</div>"
+                f"<div class=\'alumno-ci\'>{ci_text}</div>"
+                f"</div>",
                 unsafe_allow_html=True,
             )
 
-        with col_p:
-            btn_style = "background:#2ecc71;color:white;" if letra_actual=="P" else "background:transparent;color:#2ecc71;"
-            st.markdown(
-                f"<style>#btn_p_{row['estudiante_id']} button{{border-radius:50%!important;width:48px!important;height:48px!important;padding:0!important;font-weight:700!important;font-size:17px!important;border:2px solid #2ecc71!important;{btn_style}}}</style>",
-                unsafe_allow_html=True,
+        with col_radio:
+            st.radio(
+                label="estado",
+                options=OPCIONES,
+                index=idx,
+                key=key,
+                horizontal=True,
+                label_visibility="collapsed",
             )
-            if st.button("P", key=f"p_{row['estudiante_id']}", help="Presente"):
-                st.session_state[key] = "Presente"
-                st.rerun()
 
-        with col_a:
-            btn_style = "background:#e74c3c;color:white;" if letra_actual=="A" else "background:transparent;color:#e74c3c;"
-            st.markdown(
-                f"<style>#btn_a_{row['estudiante_id']} button{{border-radius:50%!important;width:48px!important;height:48px!important;padding:0!important;font-weight:700!important;font-size:17px!important;border:2px solid #e74c3c!important;{btn_style}}}</style>",
-                unsafe_allow_html=True,
-            )
-            if st.button("A", key=f"a_{row['estudiante_id']}", help="Ausente"):
-                st.session_state[key] = "Ausente Injustificado"
-                st.rerun()
-
-        with col_j:
-            btn_style = "background:#f39c12;color:white;" if letra_actual=="J" else "background:transparent;color:#f39c12;"
-            st.markdown(
-                f"<style>#btn_j_{row['estudiante_id']} button{{border-radius:50%!important;width:48px!important;height:48px!important;padding:0!important;font-weight:700!important;font-size:17px!important;border:2px solid #f39c12!important;{btn_style}}}</style>",
-                unsafe_allow_html=True,
-            )
-            if st.button("J", key=f"j_{row['estudiante_id']}", help="Justificado"):
-                st.session_state[key] = "Ausente Justificado"
-                st.rerun()
-
-        st.markdown("<hr style='margin:2px 0;opacity:0.1'>", unsafe_allow_html=True)
+        st.markdown("<hr style='margin:1px 0;opacity:0.1'>", unsafe_allow_html=True)
 
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
     if st.button("💾 Guardar Asistencia", type="primary", use_container_width=True):
         registros = [
             (row["estudiante_id"], fecha_sel,
-             st.session_state.get(f"est_{row['estudiante_id']}", "Presente"))
+             OPCION_A_ESTADO.get(st.session_state.get(f"est_{row['estudiante_id']}", "P"), "Presente"))
             for _, row in df.iterrows()
         ]
         guardar_asistencia(registros)

@@ -5,6 +5,7 @@ importación PDF, edición de estudiantes, logo institucional.
 """
 
 import streamlit as st
+import extra_streamlit_components as stx
 import psycopg2
 import psycopg2.extras
 import pandas as pd
@@ -37,11 +38,16 @@ ESTADOS = ["Presente", "Ausente Injustificado", "Ausente Justificado"]
 # LOGIN
 # ─────────────────────────────────────────────
 
+@st.cache_resource
+def get_cookie_manager():
+    """Cookie manager singleton — debe llamarse una sola vez."""
+    return stx.CookieManager(key="cm")
+
+
 def pagina_login():
     """Pantalla de inicio de sesión."""
     st.markdown("""
     <style>
-    /* Ocultar sidebar y header en login */
     [data-testid="stSidebar"] { display: none !important; }
     [data-testid="stHeader"]  { display: none !important; }
     .main .block-container {
@@ -49,37 +55,19 @@ def pagina_login():
         margin: 0 auto !important;
         padding-top: 80px !important;
     }
-    .login-header {
-        text-align: center;
-        margin-bottom: 32px;
-    }
-    .login-icon { font-size: 56px; line-height: 1.1; }
-    .login-title {
-        font-size: 26px;
-        font-weight: 700;
-        margin-top: 8px;
-        color: #0f1117;
-    }
-    .login-sub {
-        font-size: 13px;
-        color: #666;
-        margin-top: 4px;
-    }
     </style>
     """, unsafe_allow_html=True)
 
-    # Encabezado visual limpio — solo HTML estático, sin widgets dentro
     st.markdown("""
-    <div class="login-header">
-        <div class="login-icon">🏫</div>
-        <div class="login-title">Asistencia Escolar</div>
-        <div class="login-sub">MEC Paraguay &middot; Tercer Ciclo &amp; Nivel Medio</div>
+    <div style="text-align:center;margin-bottom:32px;">
+        <div style="font-size:56px;">🏫</div>
+        <div style="font-size:26px;font-weight:700;margin-top:8px;">Asistencia Escolar</div>
+        <div style="font-size:13px;opacity:0.6;margin-top:4px;">MEC Paraguay &middot; Tercer Ciclo &amp; Nivel Medio</div>
     </div>
     """, unsafe_allow_html=True)
 
-    usuario   = st.text_input("👤 Usuario", placeholder="Ingresá tu usuario")
+    usuario    = st.text_input("👤 Usuario", placeholder="Ingresá tu usuario")
     contrasena = st.text_input("🔒 Contraseña", type="password", placeholder="Ingresá tu contraseña")
-
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
     if st.button("Ingresar", type="primary", use_container_width=True):
@@ -87,14 +75,28 @@ def pagina_login():
         clave_ok   = st.secrets.get("app_password", "123456")
         if usuario == usuario_ok and contrasena == clave_ok:
             st.session_state["autenticado"] = True
+            # Guardar cookie por 7 días
+            cm = get_cookie_manager()
+            cm.set("sesion_activa", "1", max_age=60*60*24*7)
             st.rerun()
         else:
             st.error("❌ Usuario o contraseña incorrectos.")
 
 
 def verificar_login():
-    """Devuelve True si el usuario está autenticado."""
-    return st.session_state.get("autenticado", False)
+    """Devuelve True si el usuario está autenticado (session_state O cookie)."""
+    if st.session_state.get("autenticado"):
+        return True
+    # Intentar leer cookie
+    try:
+        cm = get_cookie_manager()
+        val = cm.get("sesion_activa")
+        if val == "1":
+            st.session_state["autenticado"] = True
+            return True
+    except Exception:
+        pass
+    return False
 
 
 # ─────────────────────────────────────────────
@@ -1106,6 +1108,11 @@ def main():
         st.divider()
         if st.button("🚪 Cerrar sesión", key="nav_logout"):
             st.session_state["autenticado"] = False
+            try:
+                cm = get_cookie_manager()
+                cm.delete("sesion_activa")
+            except Exception:
+                pass
             st.rerun()
 
     pagina = st.session_state["pagina_sel"]

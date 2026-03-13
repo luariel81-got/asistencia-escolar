@@ -621,12 +621,17 @@ def pagina_pasar_lista():
     ESTADO_A_OPCION = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
     OPCION_A_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
 
-    # Construir estado inicial
+    # Clave de sesión con grado+fecha — permite tener varios grados en memoria simultáneamente
+    def sk(eid): return f"est_{grado_sel}_{fecha_sel}_{eid}"
+
     cache_key = f"cache_{grado_sel}_{fecha_sel}"
     if st.session_state.get("lista_cache_key") != cache_key:
         for _, row in df.iterrows():
-            e = row["estado"] if row["estado"] in ESTADOS else "Presente"
-            st.session_state[f"est_{row['estudiante_id']}"] = ESTADO_A_OPCION.get(e, "P")
+            # Solo inicializar si no hay valor previo (preservar cambios del usuario)
+            eid = int(row["estudiante_id"])
+            if sk(eid) not in st.session_state:
+                e = row["estado"] if row["estado"] in ESTADOS else "Presente"
+                st.session_state[sk(eid)] = ESTADO_A_OPCION.get(e, "P")
         st.session_state["lista_cache_key"] = cache_key
 
     col_info, col_agregar = st.columns([3, 1])
@@ -661,7 +666,7 @@ def pagina_pasar_lista():
 
     if st.button("✅ Marcar todos Presentes"):
         for _, row in df.iterrows():
-            st.session_state[f"est_{row['estudiante_id']}"] = "P"
+            st.session_state[sk(int(row["estudiante_id"]))] = "P"
         st.rerun()
 
     # ── Lista 100% en JavaScript — cero viajes al servidor al tocar P/A/J ──
@@ -671,7 +676,7 @@ def pagina_pasar_lista():
         eid = int(row["estudiante_id"])
         nombre = str(row["nombre"])
         ci = str(row.get("ci", "") or "")
-        estado = st.session_state.get(f"est_{eid}", "P")
+        estado = st.session_state.get(sk(eid), "P")
         alumnos_js.append({"id": eid, "nombre": nombre, "ci": ci, "estado": estado})
 
     import json
@@ -799,7 +804,7 @@ def pagina_pasar_lista():
     ''', unsafe_allow_html=True)
     estados_raw = st.text_area(
         "estados_json",
-        value=json.dumps({str(int(row["estudiante_id"])): st.session_state.get(f"est_{int(row['estudiante_id'])}", "P") for _, row in df.iterrows()}),
+        value=json.dumps({str(int(row["estudiante_id"])): st.session_state.get(sk(int(row["estudiante_id"])), "P") for _, row in df.iterrows()}),
         key="estados_json_field",
         label_visibility="collapsed",
         height=68,
@@ -811,10 +816,13 @@ def pagina_pasar_lista():
             estados_dict = json.loads(estados_raw)
         except Exception:
             estados_dict = {}
+        # Persistir en session_state con clave grado+fecha para no perder al volver
+        for eid_str, opcion in estados_dict.items():
+            st.session_state[sk(int(eid_str))] = opcion
         registros = []
         for _, row in df.iterrows():
             eid = str(int(row["estudiante_id"]))
-            opcion = estados_dict.get(eid, st.session_state.get(f"est_{eid}", "P"))
+            opcion = estados_dict.get(eid, st.session_state.get(sk(int(eid)), "P"))
             estado_final = OPCION_A_ESTADO.get(opcion, "Presente")
             registros.append((row["estudiante_id"], fecha_sel, estado_final))
         guardar_asistencia(registros)

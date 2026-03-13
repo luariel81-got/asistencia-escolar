@@ -171,52 +171,53 @@ def run_df(sql, params=None) -> pd.DataFrame:
 def init_db():
     conn = get_conn()
     with conn.cursor() as cur:
+        # Verificar si las tablas ya existen — si sí, saltar DDL pesado
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS config (
-                clave TEXT PRIMARY KEY,
-                valor TEXT
-            );
-            CREATE TABLE IF NOT EXISTS grados (
-                id SERIAL PRIMARY KEY,
-                nombre TEXT UNIQUE NOT NULL,
-                nivel TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS estudiantes (
-                id SERIAL PRIMARY KEY,
-                nombre TEXT NOT NULL,
-                ci TEXT,
-                grado_id INTEGER NOT NULL REFERENCES grados(id),
-                contacto TEXT
-            );
-            CREATE TABLE IF NOT EXISTS asistencia (
-                id SERIAL PRIMARY KEY,
-                estudiante_id INTEGER NOT NULL REFERENCES estudiantes(id),
-                fecha DATE NOT NULL,
-                estado TEXT NOT NULL CHECK(estado IN (
-                    'Presente','Ausente Injustificado','Ausente Justificado'
-                )),
-                UNIQUE(estudiante_id, fecha)
-            );
+            SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema = 'public'
+            AND table_name IN ('config','grados','estudiantes','asistencia')
         """)
-        cur.execute("ALTER TABLE estudiantes ADD COLUMN IF NOT EXISTS ci TEXT;")
-        # Migrar BTC → BC antes de insertar nuevos grados
-        cur.execute("""
-            UPDATE grados
-            SET nombre = REPLACE(nombre, 'BTC', 'BC'),
-                nivel  = REPLACE(nivel,  'BTC', 'BC')
-            WHERE nombre LIKE '%%BTC%%'
-        """)
-        # Insertar/actualizar grados según configuración actual
+        tablas_existentes = cur.fetchone()[0]
+
+        if tablas_existentes < 4:
+            # Primera vez — crear todo
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS config (
+                    clave TEXT PRIMARY KEY,
+                    valor TEXT
+                );
+                CREATE TABLE IF NOT EXISTS grados (
+                    id SERIAL PRIMARY KEY,
+                    nombre TEXT UNIQUE NOT NULL,
+                    nivel TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS estudiantes (
+                    id SERIAL PRIMARY KEY,
+                    nombre TEXT NOT NULL,
+                    ci TEXT,
+                    grado_id INTEGER NOT NULL REFERENCES grados(id),
+                    contacto TEXT
+                );
+                CREATE TABLE IF NOT EXISTS asistencia (
+                    id SERIAL PRIMARY KEY,
+                    estudiante_id INTEGER NOT NULL REFERENCES estudiantes(id),
+                    fecha DATE NOT NULL,
+                    estado TEXT NOT NULL CHECK(estado IN (
+                        'Presente','Ausente Injustificado','Ausente Justificado'
+                    )),
+                    UNIQUE(estudiante_id, fecha)
+                );
+            """)
+
+        # Siempre: migración BTC→BC e insertar grados faltantes (rápido con ON CONFLICT)
+        cur.execute("UPDATE grados SET nombre=REPLACE(nombre,'BTC','BC'), nivel=REPLACE(nivel,'BTC','BC') WHERE nombre LIKE '%%BTC%%'")
         for nivel, lista in GRADOS.items():
             for grado in lista:
                 cur.execute(
                     "INSERT INTO grados (nombre, nivel) VALUES (%s, %s) ON CONFLICT (nombre) DO UPDATE SET nivel=EXCLUDED.nivel",
                     (grado, nivel),
                 )
-        for clave, valor in [
-            ("institucion_nombre", "Institución Educativa"),
-            ("institucion_logo", ""),
-        ]:
+        for clave, valor in [("institucion_nombre", "Institución Educativa"), ("institucion_logo", "")]:
             cur.execute(
                 "INSERT INTO config (clave, valor) VALUES (%s, %s) ON CONFLICT (clave) DO NOTHING",
                 (clave, valor),
@@ -1072,7 +1073,9 @@ def main():
         pagina_login()
         st.stop()
 
-    # ── APP ── init solo una vez por sesión ──
+    inject_css()
+
+    # ── Init BD solo una vez por sesión ──
     if not st.session_state.get("db_inicializada"):
         try:
             init_db()
@@ -1082,12 +1085,14 @@ def main():
             st.error(f"❌ No se pudo conectar a la base de datos.\n\n`{e}`")
             st.stop()
 
-    inject_css()
-
     # Config en caché — solo consulta si no está en session_state
     if "cfg_nombre" not in st.session_state:
-        st.session_state["cfg_nombre"] = get_config("institucion_nombre")
-        st.session_state["cfg_logo"]   = get_config("institucion_logo")
+        try:
+            st.session_state["cfg_nombre"] = get_config("institucion_nombre")
+            st.session_state["cfg_logo"]   = get_config("institucion_logo")
+        except Exception:
+            st.session_state["cfg_nombre"] = "Institución Educativa"
+            st.session_state["cfg_logo"]   = ""
     institucion_nombre = st.session_state["cfg_nombre"]
     logo_b64           = st.session_state["cfg_logo"]
 
@@ -1189,4 +1194,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

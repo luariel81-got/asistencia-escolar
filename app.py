@@ -972,9 +972,12 @@ def pagina_gestion():
                 ng = st.selectbox("Grado", TODOS_LOS_GRADOS, index=TODOS_LOS_GRADOS.index(grado_ver))
                 nco= st.text_input("Contacto", value=ar.get("contacto","") or "")
                 if st.form_submit_button("💾 Guardar Cambios", type="primary"):
-                    actualizar_estudiante(ar["id"], nn, nc, ng, nco)
-                    st.success(f"✅ Datos de **{nn}** actualizados.")
-                    st.rerun()
+                    try:
+                        actualizar_estudiante(ar["id"], nn, nc, ng, nco)
+                        st.success(f"✅ Datos de **{nn}** actualizados.")
+                        st.rerun()
+                    except Exception as ex:
+                        st.error(f"❌ Error al guardar: {ex}")
 
     with tabs[3]:
         st.subheader("📞 Contactos de estudiantes")

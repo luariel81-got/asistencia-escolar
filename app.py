@@ -333,6 +333,16 @@ def get_asistencia_fecha(grado_nombre, fecha, turno="Mañana"):
     return st.session_state[cache_k]
 
 
+def guardar_un_estado(est_id, fecha, turno, estado):
+    """Guarda un solo registro inmediatamente — llamado al tocar P/A/J."""
+    run_query("""
+        INSERT INTO asistencia (estudiante_id, fecha, turno, estado)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (estudiante_id, fecha, turno)
+        DO UPDATE SET estado = EXCLUDED.estado
+    """, (int(est_id), fecha, turno, estado), fetch=False)
+
+
 def guardar_asistencia(registros, turno="Mañana"):
     conn = get_conn()
     with conn.cursor() as cur:
@@ -724,7 +734,7 @@ def pagina_pasar_lista():
                 st.session_state[sk(int(row["estudiante_id"]))] = "P"
             st.rerun()
     with cb:
-        if st.button("💾 Guardar Asistencia", type="primary", use_container_width=True):
+        if st.button("💾 Guardar todo", type="primary", use_container_width=True):
             registros = [(int(r["estudiante_id"]), fecha_sel,
                          OPCION_A_ESTADO.get(st.session_state.get(sk(int(r["estudiante_id"])), "P"), "Presente"))
                          for _, r in df.iterrows()]
@@ -732,38 +742,15 @@ def pagina_pasar_lista():
                 guardar_asistencia(registros, turno=turno_sel)
                 st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
                 st.session_state.pop("metrics_ts", None)
-                st.success(f"✅ Guardado — {grado_sel} {turno_sel} {fecha_sel.strftime('%d/%m/%Y')}")
+                st.success(f"✅ Lista completa guardada — {grado_sel} {turno_sel} {fecha_sel.strftime('%d/%m/%Y')}")
                 st.balloons()
             except Exception as ex:
                 st.error(f"❌ {ex}")
 
     st.markdown("---")
 
-    # ── Paginación: 15 alumnos por página ──
-    PAGE_SIZE = 15
-    total_pages = max(1, (len(df) - 1) // PAGE_SIZE + 1)
-    if "lista_pagina" not in st.session_state:
-        st.session_state["lista_pagina"] = 0
-    pag = st.session_state["lista_pagina"]
-
-    if total_pages > 1:
-        pc1, pc2, pc3 = st.columns([1, 3, 1])
-        with pc1:
-            if st.button("◀", disabled=pag == 0, use_container_width=True):
-                st.session_state["lista_pagina"] -= 1
-                st.rerun()
-        with pc2:
-            st.markdown(f"<div style='text-align:center;padding-top:8px'>Página {pag+1} de {total_pages}</div>",
-                        unsafe_allow_html=True)
-        with pc3:
-            if st.button("▶", disabled=pag >= total_pages - 1, use_container_width=True):
-                st.session_state["lista_pagina"] += 1
-                st.rerun()
-
-    df_pag = df.iloc[pag * PAGE_SIZE : (pag + 1) * PAGE_SIZE]
-
-    # ── Lista alumnos (página actual) ──
-    for _, row in df_pag.iterrows():
+    # ── Lista alumnos ──
+    for _, row in df.iterrows():
         eid    = int(row["estudiante_id"])
         nombre = str(row["nombre"])
         ci     = str(row.get("ci", "") or "")
@@ -781,14 +768,20 @@ def pagina_pasar_lista():
         with c_p:
             if st.button(lbl_p, key=f"p_{eid}", use_container_width=True):
                 st.session_state[sk(eid)] = "P"
+                guardar_un_estado(eid, fecha_sel, turno_sel, "Presente")
+                st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
                 st.rerun()
         with c_a:
             if st.button(lbl_a, key=f"a_{eid}", use_container_width=True):
                 st.session_state[sk(eid)] = "A"
+                guardar_un_estado(eid, fecha_sel, turno_sel, "Ausente Injustificado")
+                st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
                 st.rerun()
         with c_j:
             if st.button(lbl_j, key=f"j_{eid}", use_container_width=True):
                 st.session_state[sk(eid)] = "J"
+                guardar_un_estado(eid, fecha_sel, turno_sel, "Ausente Justificado")
+                st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
                 st.rerun()
         with c_rep:
             if st.button("📋", key=f"rep_{eid}", use_container_width=True):

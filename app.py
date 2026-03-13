@@ -359,12 +359,12 @@ def get_resumen_grado(grado_nombre):
 
 def get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin):
     return run_df("""
-        SELECT e.nombre, e.ci, a.fecha, a.estado, g.nombre as grado
+        SELECT e.nombre, e.ci, a.fecha, a.turno, a.estado, g.nombre as grado
         FROM asistencia a
         JOIN estudiantes e ON a.estudiante_id=e.id
         JOIN grados g ON e.grado_id=g.id
         WHERE g.nombre=%s AND a.fecha BETWEEN %s AND %s
-        ORDER BY e.nombre, a.fecha
+        ORDER BY e.nombre, a.fecha, a.turno
     """, (grado_nombre, fecha_ini, fecha_fin))
 
 
@@ -495,27 +495,80 @@ def extraer_alumnos_pdf(pdf_bytes):
 # EXPORTACIÓN EXCEL
 # ─────────────────────────────────────────────
 
+def _hacer_hoja_diaria(wb, titulo, df_turno, alumnos, fechas, hfill, hfont, brd, tfont, verde, rojo, amarillo, grado_nombre, fecha_ini, fecha_fin, institucion):
+    """Crea una hoja con filas=alumnos, columnas=fechas, valores=P/A/J."""
+    ws = wb.create_sheet(titulo)
+    ESTADO_CORTO = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
+    COLOR_PAJ    = {"P": "C6EFCE", "A": "FFC7CE", "J": "FFEB9C"}
+
+    # Título
+    ncols = 2 + len(fechas)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    ws.cell(1,1, f"{institucion} — {grado_nombre} — {titulo}").font = tfont
+    ws.cell(1,1).alignment = Alignment(horizontal="center")
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+    ws.cell(2,1, f"{fecha_ini.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}").font = Font(italic=True, size=10)
+    ws.cell(2,1).alignment = Alignment(horizontal="center")
+
+    # Encabezados
+    for ci, h in enumerate(["Nombre", "CI"], 1):
+        c = ws.cell(3, ci, h); c.fill=hfill; c.font=hfont
+        c.alignment=Alignment(horizontal="center"); c.border=brd
+
+    DIAS_ES = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"]
+    for fi, fecha in enumerate(fechas):
+        lbl = DIAS_ES[fecha.weekday()] + "\n" + fecha.strftime('%d/%m')
+        c = ws.cell(3, 3+fi, lbl); c.fill=hfill; c.font=hfont
+        c.alignment=Alignment(horizontal="center", wrap_text=True); c.border=brd
+    ws.row_dimensions[3].height = 30
+
+    # Construir lookup: (nombre, fecha) → estado corto
+    lookup = {}
+    for _, r in df_turno.iterrows():
+        f = r["fecha"] if isinstance(r["fecha"], date) else pd.to_datetime(r["fecha"]).date()
+        lookup[(r["nombre"], f)] = ESTADO_CORTO.get(r["estado"], "")
+
+    # Filas de alumnos
+    for ri, (nombre, ci_val) in enumerate(alumnos):
+        row_n = 4 + ri
+        c = ws.cell(row_n, 1, nombre); c.border=brd; c.alignment=Alignment(horizontal="left")
+        c = ws.cell(row_n, 2, ci_val); c.border=brd; c.alignment=Alignment(horizontal="center")
+        for fi, fecha in enumerate(fechas):
+            val = lookup.get((nombre, fecha), "")
+            c = ws.cell(row_n, 3+fi, val)
+            c.border=brd; c.alignment=Alignment(horizontal="center")
+            if val in COLOR_PAJ:
+                c.fill = PatternFill("solid", fgColor=COLOR_PAJ[val])
+
+    # Anchos de columna
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 12
+    for fi in range(len(fechas)):
+        ws.column_dimensions[get_column_letter(3+fi)].width = 8
+
+
 def generar_excel_resumen(grado_nombre, fecha_ini, fecha_fin, institucion):
-    df = get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin)
+    df_todo = get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin)
+
+    wb   = openpyxl.Workbook()
+    hfill    = PatternFill("solid", fgColor="1F4E79")
+    hfont    = Font(color="FFFFFF", bold=True, size=11)
+    tfont    = Font(bold=True, size=14, color="1F4E79")
+    brd      = Border(left=Side(style="thin"), right=Side(style="thin"),
+                      top=Side(style="thin"), bottom=Side(style="thin"))
+    verde    = PatternFill("solid", fgColor="C6EFCE")
+    rojo     = PatternFill("solid", fgColor="FFC7CE")
+    amarillo = PatternFill("solid", fgColor="FFEB9C")
+
+    # ── Hoja 1: Resumen General ──
     resumen = get_resumen_grado(grado_nombre)
-    wb = openpyxl.Workbook()
     ws1 = wb.active
     ws1.title = "Resumen General"
-
-    hfill  = PatternFill("solid", fgColor="1F4E79")
-    hfont  = Font(color="FFFFFF", bold=True, size=11)
-    tfont  = Font(bold=True, size=14, color="1F4E79")
-    brd    = Border(left=Side(style="thin"), right=Side(style="thin"),
-                    top=Side(style="thin"), bottom=Side(style="thin"))
-    verde  = PatternFill("solid", fgColor="C6EFCE")
-    rojo   = PatternFill("solid", fgColor="FFC7CE")
-    amarillo = PatternFill("solid", fgColor="FFEB9C")
 
     ws1.merge_cells("A1:G1")
     ws1["A1"] = f"{institucion} — Registro de Asistencia"
     ws1["A1"].font = tfont
     ws1["A1"].alignment = Alignment(horizontal="center")
-
     ws1.merge_cells("A2:G2")
     ws1["A2"] = f"{grado_nombre}   |   {fecha_ini.strftime('%d/%m/%Y')} al {fecha_fin.strftime('%d/%m/%Y')}"
     ws1["A2"].alignment = Alignment(horizontal="center")
@@ -523,11 +576,11 @@ def generar_excel_resumen(grado_nombre, fecha_ini, fecha_fin, institucion):
 
     for ci, h in enumerate(["Nombre","CI","Presentes","F. Injustificadas","F. Justificadas","Días","% Asistencia"], 1):
         c = ws1.cell(row=4, column=ci, value=h)
-        c.fill = hfill; c.font = hfont
-        c.alignment = Alignment(horizontal="center"); c.border = brd
+        c.fill=hfill; c.font=hfont; c.alignment=Alignment(horizontal="center"); c.border=brd
 
-    est_ci = run_df("SELECT e.nombre, e.ci FROM estudiantes e JOIN grados g ON e.grado_id=g.id WHERE g.nombre=%s ORDER BY e.nombre", (grado_nombre,))
-    ci_map = dict(zip(est_ci["nombre"], est_ci["ci"])) if not est_ci.empty else {}
+    est_ci = run_df("SELECT e.nombre,e.ci FROM estudiantes e JOIN grados g ON e.grado_id=g.id WHERE g.nombre=%s ORDER BY e.nombre", (grado_nombre,))
+    ci_map  = dict(zip(est_ci["nombre"], est_ci["ci"])) if not est_ci.empty else {}
+    alumnos = [(r["nombre"], ci_map.get(r["nombre"],"")) for _, r in est_ci.iterrows()]
 
     for ri, row in resumen.iterrows():
         pct = round(row["presentes"]/row["total_dias"]*100, 1) if row["total_dias"] > 0 else 0
@@ -535,36 +588,31 @@ def generar_excel_resumen(grado_nombre, fecha_ini, fecha_fin, institucion):
                                    row["presentes"], row["inj"], row["just"],
                                    row["total_dias"], f"{pct}%"], 1):
             c = ws1.cell(row=ri+4, column=ci, value=val)
-            c.border = brd
-            c.alignment = Alignment(horizontal="left" if ci==1 else "center")
-            if ci == 7:
-                c.fill = verde if pct >= 75 else rojo
-
+            c.border=brd; c.alignment=Alignment(horizontal="left" if ci==1 else "center")
+            if ci==7: c.fill = verde if pct>=75 else rojo
     for i, w in enumerate([30,12,12,18,16,12,14], 1):
         ws1.column_dimensions[get_column_letter(i)].width = w
 
-    if not df.empty:
-        ws2 = wb.create_sheet("Ausencias y Justificados")
-        aus = df[df["estado"] != "Presente"].copy()
-        for ci, h in enumerate(["Fecha","Nombre","CI","Grado","Estado"], 1):
-            c = ws2.cell(row=1, column=ci, value=h)
-            c.fill = hfill; c.font = hfont
-            c.alignment = Alignment(horizontal="center"); c.border = brd
-        for ri, row in aus.iterrows():
-            fecha_str = row["fecha"].strftime("%d/%m/%Y") if hasattr(row["fecha"],"strftime") else str(row["fecha"])
-            for ci, val in enumerate([fecha_str, row["nombre"], row.get("ci",""), row["grado"], row["estado"]], 1):
-                c = ws2.cell(row=ri+1, column=ci, value=val)
-                c.border = brd
-                c.alignment = Alignment(horizontal="left" if ci==2 else "center")
-                if ci == 5:
-                    c.fill = rojo if "Injustificado" in str(val) else amarillo
-        for i, w in enumerate([14,30,12,16,22], 1):
-            ws2.column_dimensions[get_column_letter(i)].width = w
+    # ── Fechas únicas del rango ──
+    if not df_todo.empty:
+        fechas_unicas = sorted(set(
+            r if isinstance(r, date) else pd.to_datetime(r).date()
+            for r in df_todo["fecha"]
+        ))
+        turnos_presentes = sorted(df_todo["turno"].dropna().unique())
+
+        # ── Hojas por turno: filas=alumnos, columnas=fechas ──
+        for turno in turnos_presentes:
+            df_t = df_todo[df_todo["turno"] == turno]
+            _hacer_hoja_diaria(
+                wb, turno, df_t, alumnos, fechas_unicas,
+                hfill, hfont, brd, tfont, verde, rojo, amarillo,
+                grado_nombre, fecha_ini, fecha_fin, institucion
+            )
 
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
-
 
 # ─────────────────────────────────────────────
 # CSS

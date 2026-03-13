@@ -163,20 +163,29 @@ def get_conn():
 
 
 def run_query(sql, params=None, fetch=True):
-    conn = get_conn()
-    try:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, params or ())
-            if fetch:
-                return cur.fetchall()
-            conn.commit()
-            return None
-    except Exception as e:
+    for intento in range(3):
         try:
-            conn.rollback()
-        except Exception:
-            pass
-        raise e
+            conn = get_conn()
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, params or ())
+                if fetch:
+                    return cur.fetchall()
+                conn.commit()
+                return None
+        except psycopg2.Error as e:
+            # Forzar reconexión en el próximo intento
+            try:
+                st.session_state["db_conn"].rollback()
+            except Exception:
+                pass
+            try:
+                st.session_state["db_conn"].close()
+            except Exception:
+                pass
+            st.session_state.pop("db_conn", None)
+            if intento == 2:
+                raise e
+    return None
 
 
 def run_df(sql, params=None) -> pd.DataFrame:

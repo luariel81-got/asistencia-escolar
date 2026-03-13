@@ -32,6 +32,7 @@ GRADOS = {
 }
 TODOS_LOS_GRADOS = [g for nivel in GRADOS.values() for g in nivel]
 ESTADOS = ["Presente", "Ausente Injustificado", "Ausente Justificado"]
+TURNOS  = ["Mañana", "Tarde"]
 
 # ─────────────────────────────────────────────
 # LOGIN
@@ -209,6 +210,29 @@ def init_db():
                 );
             """)
 
+        # Migración: agregar columna turno si no existe
+        cur.execute("ALTER TABLE asistencia ADD COLUMN IF NOT EXISTS turno TEXT DEFAULT 'Mañana';")
+        cur.execute("UPDATE asistencia SET turno = 'Mañana' WHERE turno IS NULL;")
+        # Recrear constraint UNIQUE con turno si solo existe el viejo
+        cur.execute("""
+            DO $do$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'asistencia_estudiante_id_fecha_key'
+                ) THEN
+                    ALTER TABLE asistencia DROP CONSTRAINT asistencia_estudiante_id_fecha_key;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'asistencia_estudiante_id_fecha_turno_key'
+                ) THEN
+                    ALTER TABLE asistencia ADD CONSTRAINT asistencia_estudiante_id_fecha_turno_key
+                        UNIQUE (estudiante_id, fecha, turno);
+                END IF;
+            END $do$;
+        """)
+
         # Siempre: migración BTC→BC e insertar grados faltantes (rápido con ON CONFLICT)
         cur.execute("UPDATE grados SET nombre=REPLACE(nombre,'BTC','BC'), nivel=REPLACE(nivel,'BTC','BC') WHERE nombre LIKE '%%BTC%%'")
         for nivel, lista in GRADOS.items():
@@ -295,27 +319,28 @@ def get_estudiantes_por_grado(grado_nombre):
     """, (grado_nombre,))
 
 
-def get_asistencia_fecha(grado_nombre, fecha):
-    cache_k = f"asist_{grado_nombre}_{fecha}"
+def get_asistencia_fecha(grado_nombre, fecha, turno="Mañana"):
+    cache_k = f"asist_{grado_nombre}_{fecha}_{turno}"
     if cache_k not in st.session_state:
         st.session_state[cache_k] = run_df("""
             SELECT e.id as estudiante_id, e.nombre, e.ci,
                    COALESCE(a.estado, 'Sin registro') as estado
             FROM estudiantes e JOIN grados g ON e.grado_id = g.id
-            LEFT JOIN asistencia a ON a.estudiante_id = e.id AND a.fecha = %s
+            LEFT JOIN asistencia a ON a.estudiante_id = e.id
+                AND a.fecha = %s AND a.turno = %s
             WHERE g.nombre = %s ORDER BY e.nombre
-        """, (fecha, grado_nombre))
+        """, (fecha, turno, grado_nombre))
     return st.session_state[cache_k]
 
 
-def guardar_asistencia(registros):
+def guardar_asistencia(registros, turno="Mañana"):
     conn = get_conn()
     with conn.cursor() as cur:
         for est_id, fecha, estado in registros:
             cur.execute("""
-                INSERT INTO asistencia (estudiante_id, fecha, estado) VALUES (%s,%s,%s)
-                ON CONFLICT (estudiante_id, fecha) DO UPDATE SET estado=EXCLUDED.estado
-            """, (est_id, fecha, estado))
+                INSERT INTO asistencia (estudiante_id, fecha, turno, estado) VALUES (%s,%s,%s,%s)
+                ON CONFLICT (estudiante_id, fecha, turno) DO UPDATE SET estado=EXCLUDED.estado
+            """, (est_id, fecha, turno, estado))
         conn.commit()
 
 
@@ -619,21 +644,23 @@ def inject_css():
 def pagina_pasar_lista():
     st.header("📋 Pasar Lista")
 
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns([3, 2, 1])
     with col1:
         grado_sel = st.selectbox("Grado", TODOS_LOS_GRADOS, key="lista_grado")
     with col2:
+        turno_sel = st.radio("Turno", TURNOS, horizontal=True, key="lista_turno")
+    with col3:
         fecha_sel = st.date_input("Fecha", value=date.today(), key="lista_fecha")
 
-    df = get_asistencia_fecha(grado_sel, fecha_sel)
+    df = get_asistencia_fecha(grado_sel, fecha_sel, turno_sel)
 
     ESTADO_A_OPCION = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
     OPCION_A_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
 
-    def sk(eid): return f"est_{grado_sel}_{fecha_sel}_{eid}"
+    def sk(eid): return f"est_{grado_sel}_{fecha_sel}_{turno_sel}_{eid}"
 
     # Inicializar estados desde BD solo una vez por grado+fecha
-    cache_key   = f"cache_{grado_sel}_{fecha_sel}"
+    cache_key   = f"cache_{grado_sel}_{fecha_sel}_{turno_sel}"
     grados_init = st.session_state.setdefault("grados_init", set())
     if cache_key not in grados_init and not df.empty:
         for _, row in df.iterrows():
@@ -667,7 +694,7 @@ def pagina_pasar_lista():
                 if nuevo_nombre.strip():
                     try:
                         agregar_estudiante(nuevo_nombre.strip().upper(), nuevo_ci.strip(), grado_sel, "")
-                        st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}", None)
+                        st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
                         grados_init.discard(cache_key)
                         st.session_state["mostrar_form_agregar_lista"] = False
                         st.rerun()
@@ -777,10 +804,10 @@ def pagina_pasar_lista():
             opcion = st.session_state.get(sk(eid), "P")
             registros.append((eid, fecha_sel, OPCION_A_ESTADO.get(opcion, "Presente")))
         try:
-            guardar_asistencia(registros)
-            st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}", None)
+            guardar_asistencia(registros, turno=turno_sel)
+            st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
             st.session_state.pop("metrics_ts", None)
-            st.success(f"✅ Asistencia guardada — {grado_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
+            st.success(f"✅ Asistencia guardada — {grado_sel} — {turno_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
             st.balloons()
         except Exception as ex:
             st.error(f"❌ Error al guardar: {ex}")

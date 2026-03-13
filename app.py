@@ -37,44 +37,13 @@ ESTADOS = ["Presente", "Ausente Injustificado", "Ausente Justificado"]
 # LOGIN
 # ─────────────────────────────────────────────
 
-def _leer_cookie_js():
-    """Inyecta JS que lee la cookie y la pasa a Streamlit via query_params."""
-    st.components.v1.html("""
-    <script>
-    function getCookie(name) {
-        const v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
-        return v ? v[2] : null;
-    }
-    const val = getCookie("asistencia_sesion");
-    if (val === "ok") {
-        // Recargar con param para que Python lo detecte
-        if (!window.location.search.includes("sesion=ok")) {
-            const url = window.location.href.split("?")[0] + "?sesion=ok";
-            window.parent.location.href = url;
-        }
-    }
-    </script>
-    """, height=0)
+# Token de sesión — se guarda en la URL para sobrevivir recargas
+import hashlib, os
 
-
-def _set_cookie_js():
-    """Inyecta JS que escribe la cookie de sesión por 7 días."""
-    st.components.v1.html("""
-    <script>
-    const d = new Date();
-    d.setTime(d.getTime() + 7*24*60*60*1000);
-    document.cookie = "asistencia_sesion=ok; expires=" + d.toUTCString() + "; path=/; SameSite=Lax";
-    </script>
-    """, height=0)
-
-
-def _clear_cookie_js():
-    """Inyecta JS que borra la cookie."""
-    st.components.v1.html("""
-    <script>
-    document.cookie = "asistencia_sesion=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-    </script>
-    """, height=0)
+def _generar_token():
+    """Genera un token único por sesión basado en secrets."""
+    base = st.secrets.get("app_usuario", "Lucasmen") + st.secrets.get("app_password", "123456")
+    return hashlib.sha256(base.encode()).hexdigest()[:16]
 
 
 def pagina_login():
@@ -108,19 +77,20 @@ def pagina_login():
         clave_ok   = st.secrets.get("app_password", "123456")
         if usuario == usuario_ok and contrasena == clave_ok:
             st.session_state["autenticado"] = True
-            _set_cookie_js()
+            # Guardar token en URL — sobrevive recargas y deslizar en tablet
+            st.query_params["t"] = _generar_token()
             st.rerun()
         else:
             st.error("❌ Usuario o contraseña incorrectos.")
 
 
 def verificar_login():
-    """Devuelve True si autenticado en session_state o via query param (cookie JS)."""
+    """Devuelve True si autenticado via session_state o token en URL."""
     if st.session_state.get("autenticado"):
         return True
-    # Cookie leída via JS → query param
-    params = st.query_params
-    if params.get("sesion") == "ok":
+    # Verificar token en query params (persiste entre recargas)
+    token_url = st.query_params.get("t", "")
+    if token_url and token_url == _generar_token():
         st.session_state["autenticado"] = True
         return True
     return False
@@ -1211,7 +1181,6 @@ def main():
         st.divider()
         if st.button("🚪 Cerrar sesión", key="nav_logout"):
             st.session_state["autenticado"] = False
-            _clear_cookie_js()
             st.query_params.clear()
             st.rerun()
 

@@ -987,7 +987,7 @@ def pagina_alertas():
 
 def pagina_gestion():
     st.header("🎓 Gestión de Estudiantes")
-    tabs = st.tabs(["➕ Agregar","📥 Importar PDF","✏️ Editar / Mover","📞 Contactos","🗑️ Eliminar"])
+    tabs = st.tabs(["➕ Agregar","📥 Importar PDF","📊 Importar Excel Asistencia","✏️ Editar / Mover","📞 Contactos","🗑️ Eliminar"])
 
     with tabs[0]:
         with st.form("form_agregar"):
@@ -1035,6 +1035,113 @@ def pagina_gestion():
                 st.error(f"❌ Error al leer el PDF: {e}")
 
     with tabs[2]:
+        st.subheader("📊 Importar historial de asistencia desde Excel")
+        st.info("""**Formato esperado:** igual al reporte exportado de la app.
+        - Fila 1: encabezados — Documento | Nombre Completo | 1/3 | 3/3 | ...
+        - Las fechas se interpretan como del año actual
+        - Valores válidos: P, A, J (el guión `-` se ignora)
+        """)
+
+        col_g, col_t = st.columns(2)
+        grado_xl = col_g.selectbox("Grado destino", TODOS_LOS_GRADOS, key="xl_grado")
+        turno_xl = col_t.radio("Turno", TURNOS, horizontal=True, key="xl_turno")
+        xl_file  = st.file_uploader("Subir Excel (.xlsx)", type=["xlsx"], key="xl_upload")
+
+        if xl_file:
+            try:
+                import openpyxl as _oxl
+                from datetime import date as _date
+                wb_xl = _oxl.load_workbook(io.BytesIO(xl_file.read()))
+                ws_xl = wb_xl.active
+                rows_xl = list(ws_xl.iter_rows(values_only=True))
+                header  = rows_xl[0]
+
+                # Detectar columnas de fecha (col 3 en adelante, hasta las de totales)
+                año = _date.today().year
+                fecha_cols = []
+                for ci, h in enumerate(header):
+                    if h and str(h).strip() and "/" in str(h):
+                        try:
+                            parts = str(h).strip().split("/")
+                            if len(parts) == 2:
+                                d, m = int(parts[0]), int(parts[1])
+                                fecha_cols.append((ci, _date(año, m, d)))
+                        except Exception:
+                            pass
+
+                if not fecha_cols:
+                    st.error("❌ No se encontraron columnas de fecha en el encabezado.")
+                else:
+                    # Preview
+                    preview = []
+                    for row in rows_xl[1:]:
+                        ci_val = str(row[0] or "").strip()
+                        nombre = str(row[1] or "").strip()
+                        if not nombre:
+                            continue
+                        for ci, fecha in fecha_cols:
+                            val = str(row[ci] or "").strip().upper() if ci < len(row) else ""
+                            if val in ("P","A","J"):
+                                preview.append({"Nombre": nombre, "Fecha": fecha.strftime("%d/%m/%Y"),
+                                                "Estado": {"P":"Presente","A":"Ausente Injustificado","J":"Ausente Justificado"}[val]})
+                    
+                    if not preview:
+                        st.warning("⚠️ No se encontraron registros válidos (P/A/J).")
+                    else:
+                        df_prev_xl = pd.DataFrame(preview)
+                        st.success(f"✅ **{len(preview)} registros** encontrados en {len(fecha_cols)} fechas.")
+                        st.dataframe(df_prev_xl.head(20), use_container_width=True, hide_index=True)
+                        if len(preview) > 20:
+                            st.caption(f"...y {len(preview)-20} registros más")
+
+                        if st.button("📥 Importar a la BD", type="primary", key="btn_import_xl"):
+                            ESTADO_MAP = {"P":"Presente","A":"Ausente Injustificado","J":"Ausente Justificado"}
+                            # Obtener IDs de estudiantes por nombre o CI
+                            df_ests = get_estudiantes_por_grado(grado_xl)
+                            nombre_id = {r["nombre"].strip().upper(): int(r["id"]) for _, r in df_ests.iterrows()}
+                            ci_id     = {str(r["ci"]).strip(): int(r["id"]) for _, r in df_ests.iterrows() if r.get("ci")}
+
+                            ok, skip, err = 0, 0, 0
+                            for row in rows_xl[1:]:
+                                ci_val = str(row[0] or "").strip()
+                                nombre = str(row[1] or "").strip().upper()
+                                if not nombre:
+                                    continue
+                                # Buscar ID por CI primero, luego por nombre
+                                est_id = ci_id.get(ci_val) or nombre_id.get(nombre)
+                                if not est_id:
+                                    skip += 1
+                                    continue
+                                for ci, fecha in fecha_cols:
+                                    val = str(row[ci] or "").strip().upper() if ci < len(row) else ""
+                                    if val not in ("P","A","J"):
+                                        continue
+                                    try:
+                                        run_query("""
+                                            INSERT INTO asistencia (estudiante_id, fecha, turno, estado)
+                                            VALUES (%s,%s,%s,%s)
+                                            ON CONFLICT (estudiante_id, fecha, turno)
+                                            DO UPDATE SET estado=EXCLUDED.estado
+                                        """, (est_id, fecha, turno_xl, ESTADO_MAP[val]), fetch=False)
+                                        ok += 1
+                                    except Exception:
+                                        err += 1
+
+                            # Limpiar cachés
+                            for k in [k for k in st.session_state if k.startswith(("asist_","resumen_","rep_","grados_init"))]:
+                                st.session_state.pop(k, None)
+                            st.session_state.discard if hasattr(st.session_state, "discard") else None
+
+                            st.success(f"✅ **{ok}** registros importados.")
+                            if skip:
+                                st.warning(f"⚠️ {skip} alumnos no encontrados en {grado_xl} — verificá que estén cargados.")
+                            if err:
+                                st.error(f"❌ {err} errores al guardar.")
+
+            except Exception as e:
+                st.error(f"❌ Error al leer el archivo: {e}")
+
+    with tabs[3]:
         st.subheader("✏️ Editar datos o mover de grado")
         grado_ver = st.selectbox("Ver estudiantes de", TODOS_LOS_GRADOS, key="editar_grado")
         df_est = get_estudiantes_por_grado(grado_ver)
@@ -1056,7 +1163,7 @@ def pagina_gestion():
                     except Exception as ex:
                         st.error(f"❌ Error al guardar: {ex}")
 
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("📞 Contactos de estudiantes")
         st.caption("Agregá o editá el número de contacto. Tocá el botón para abrir WhatsApp.")
         grado_cont = st.selectbox("Grado", TODOS_LOS_GRADOS, key="cont_grado")

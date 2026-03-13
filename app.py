@@ -852,10 +852,10 @@ def pagina_pasar_lista():
                 total_rep    = len(df_rep)
                 pct = round(presentes / total_rep * 100) if total_rep > 0 else 0
                 r1, r2, r3, r4 = st.columns(4)
-                r1.metric("✅ Presentes",    presentes)
-                r2.metric("❌ Ausentes",     ausentes)
-                r3.metric("📝 Justificados", justificados)
-                r4.metric("📊 Asistencia",   f"{pct}%")
+                r1.metric("Presentes",    presentes)
+                r2.metric("Ausentes",     ausentes)
+                r3.metric("Justificados", justificados)
+                r4.metric("Asistencia",   f"{pct}%")
                 for _, r in df_rep.head(20).iterrows():
                     fstr  = pd.to_datetime(r["fecha"]).strftime("%d/%m/%Y")
                     trn   = r.get("turno", "")

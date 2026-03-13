@@ -1058,6 +1058,103 @@ def pagina_configuracion():
             st.rerun()
 
 
+def pagina_reportes():
+    st.header("📨 Reportes para compartir")
+
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        fecha_sel = st.date_input("Fecha del reporte", value=date.today(), key="rep_fecha")
+    with col2:
+        grado_ausentes = st.selectbox("Grado (ausentes)", ["Todos"] + TODOS_LOS_GRADOS, key="rep_grado")
+
+    st.markdown("---")
+
+    # ── Reporte 1: Justificados del día (todos los grados) ──
+    st.subheader("📝 Justificados del día")
+    st.caption("Alumnos con ausencia justificada — para enviar a profesores")
+
+    df_just = run_df("""
+        SELECT e.nombre, g.nombre as grado
+        FROM asistencia a
+        JOIN estudiantes e ON a.estudiante_id = e.id
+        JOIN grados g ON e.grado_id = g.id
+        WHERE a.fecha = %s AND a.estado = 'Ausente Justificado'
+        ORDER BY g.nombre, e.nombre
+    """, (fecha_sel,))
+
+    if df_just.empty:
+        st.info(f"✅ Sin justificados el {fecha_sel.strftime('%d/%m/%Y')}.")
+    else:
+        # Construir texto para copiar
+        lineas = [f"📋 *JUSTIFICADOS — {fecha_sel.strftime('%d/%m/%Y')}*", ""]
+        grado_actual = None
+        for _, r in df_just.iterrows():
+            if r["grado"] != grado_actual:
+                grado_actual = r["grado"]
+                lineas.append(f"*{grado_actual}*")
+            lineas.append(f"  • {r['nombre']}")
+        lineas.append("")
+        lineas.append(f"_Total: {len(df_just)} alumno(s)_")
+        texto_just = "\n".join(lineas)
+
+        st.text_area(
+            "Tocá el texto, seleccioná todo (Ctrl+A / ⌘+A) y copiá:",
+            value=texto_just,
+            height=max(150, len(lineas) * 22),
+            key="txt_justificados",
+        )
+        st.caption(f"📊 {len(df_just)} justificado(s) en {df_just['grado'].nunique()} grado(s)")
+
+    st.markdown("---")
+
+    # ── Reporte 2: Ausentes sin justificar por grado ──
+    st.subheader("🔴 Ausentes sin justificar")
+    st.caption("Alumnos ausentes injustificados — para notificar por grado")
+
+    query_params = (fecha_sel,)
+    filtro_grado = ""
+    if grado_ausentes != "Todos":
+        filtro_grado = "AND g.nombre = %s"
+        query_params = (fecha_sel, grado_ausentes)
+
+    df_aus = run_df(f"""
+        SELECT e.nombre, g.nombre as grado
+        FROM asistencia a
+        JOIN estudiantes e ON a.estudiante_id = e.id
+        JOIN grados g ON e.grado_id = g.id
+        WHERE a.fecha = %s AND a.estado = 'Ausente Injustificado'
+        {filtro_grado}
+        ORDER BY g.nombre, e.nombre
+    """, query_params)
+
+    if df_aus.empty:
+        st.info(f"✅ Sin ausentes injustificados el {fecha_sel.strftime('%d/%m/%Y')}" +
+                (f" en {grado_ausentes}." if grado_ausentes != "Todos" else "."))
+    else:
+        lineas2 = [f"🔴 *AUSENTES — {fecha_sel.strftime('%d/%m/%Y')}*"]
+        if grado_ausentes != "Todos":
+            lineas2[0] += f" — *{grado_ausentes}*"
+        lineas2.append("")
+        grado_actual = None
+        for _, r in df_aus.iterrows():
+            if grado_ausentes == "Todos" and r["grado"] != grado_actual:
+                grado_actual = r["grado"]
+                lineas2.append(f"*{grado_actual}*")
+            lineas2.append(f"  • {r['nombre']}")
+        lineas2.append("")
+        lineas2.append(f"_Total: {len(df_aus)} alumno(s)_")
+        texto_aus = "\n".join(lineas2)
+
+        st.text_area(
+            "Tocá el texto, seleccioná todo (Ctrl+A / ⌘+A) y copiá:",
+            value=texto_aus,
+            height=max(150, len(lineas2) * 22),
+            key="txt_ausentes",
+        )
+        st.caption(f"📊 {len(df_aus)} ausente(s) injustificado(s)")
+
+
+
 # ─────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────
@@ -1128,6 +1225,7 @@ def main():
 
     PAGINAS = [
         ("📋 Pasar Lista",          "lista"),
+        ("📨 Reportes",             "reportes"),
         ("📊 Resumen por Grado",    "resumen"),
         ("🚨 Alertas de Faltas",    "alertas"),
         ("🎓 Gestión de Estudiantes","gestion"),
@@ -1183,6 +1281,8 @@ def main():
     pagina = st.session_state["pagina_sel"]
     if pagina == "lista":
         pagina_pasar_lista()
+    elif pagina == "reportes":
+        pagina_reportes()
     elif pagina == "resumen":
         pagina_resumen()
     elif pagina == "alertas":

@@ -370,15 +370,19 @@ def get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin):
 
 def get_reporte_estudiante(est_id):
     ck = f"rep_{est_id}"
-    if ck not in st.session_state:
-        st.session_state[ck] = run_df("""
-            SELECT fecha, turno, estado
-            FROM asistencia
-            WHERE estudiante_id = %s
-            ORDER BY fecha DESC, turno
-            LIMIT 60
-        """, (int(est_id),))
-    return st.session_state[ck]
+    # Solo cachear si tiene datos — si está vacío consultar siempre
+    if ck in st.session_state and not st.session_state[ck].empty:
+        return st.session_state[ck]
+    result = run_df("""
+        SELECT fecha, turno, estado
+        FROM asistencia
+        WHERE estudiante_id = %s
+        ORDER BY fecha DESC, turno
+        LIMIT 60
+    """, (int(est_id),))
+    if not result.empty:
+        st.session_state[ck] = result
+    return result
 
 
 def detectar_faltas_consecutivas(grado_nombre=None):
@@ -1131,9 +1135,8 @@ def pagina_gestion():
                                 conn.commit()
 
                             # Limpiar cachés
-                            for k in [k for k in st.session_state if k.startswith(("asist_","resumen_","rep_","grados_init"))]:
+                            for k in [k for k in st.session_state if k.startswith(("asist_","resumen_","rep_","grados_init","alertas_"))]:
                                 st.session_state.pop(k, None)
-                            st.session_state.discard if hasattr(st.session_state, "discard") else None
 
                             st.success(f"✅ **{ok}** registros importados.")
                             if skip:

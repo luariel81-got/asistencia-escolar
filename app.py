@@ -664,20 +664,19 @@ def pagina_pasar_lista():
     with col3:
         fecha_sel = st.date_input("Fecha", value=date.today(), key="lista_fecha")
 
-    df = get_asistencia_fecha(grado_sel, fecha_sel, turno_sel)
-
     ESTADO_A_OPCION = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
     OPCION_A_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
 
     def sk(eid): return f"est_{grado_sel}_{fecha_sel}_{turno_sel}_{eid}"
 
-    # Inicializar estados desde BD solo una vez por grado+fecha
+    df = get_asistencia_fecha(grado_sel, fecha_sel, turno_sel)
+
+    # Inicializar estados desde BD solo una vez por grado+fecha+turno
     cache_key   = f"cache_{grado_sel}_{fecha_sel}_{turno_sel}"
     grados_init = st.session_state.setdefault("grados_init", set())
     if cache_key not in grados_init and not df.empty:
         for _, row in df.iterrows():
             eid = int(row["estudiante_id"])
-            # Solo setear si no existe — no pisar cambios del usuario
             if sk(eid) not in st.session_state:
                 e = row["estado"] if row["estado"] in ESTADOS else "Presente"
                 st.session_state[sk(eid)] = ESTADO_A_OPCION.get(e, "P")
@@ -690,17 +689,20 @@ def pagina_pasar_lista():
     # ── Cabecera ──
     col_info, col_agregar = st.columns([3, 1])
     with col_info:
-        st.markdown(f"**{len(df)} estudiantes** — {grado_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
+        total = len(df)
+        ausentes_n = sum(1 for _, r in df.iterrows() if st.session_state.get(sk(int(r["estudiante_id"])), "P") == "A")
+        just_n     = sum(1 for _, r in df.iterrows() if st.session_state.get(sk(int(r["estudiante_id"])), "P") == "J")
+        st.markdown(f"**{total}** alumnos · 🔴 {ausentes_n} ausentes · 🟡 {just_n} justificados")
     with col_agregar:
-        if st.button("➕ Agregar alumno", use_container_width=True):
+        if st.button("➕ Agregar", use_container_width=True):
             st.session_state["mostrar_form_agregar_lista"] = not st.session_state.get("mostrar_form_agregar_lista", False)
             st.rerun()
 
     if st.session_state.get("mostrar_form_agregar_lista"):
         with st.form("form_agregar_rapido", clear_on_submit=True):
-            st.markdown(f"**Agregar alumno a {grado_sel}**")
+            st.markdown(f"**Agregar a {grado_sel}**")
             c1, c2 = st.columns(2)
-            nuevo_nombre = c1.text_input("Nombre completo", placeholder="APELLIDO, Nombre")
+            nuevo_nombre = c1.text_input("Nombre", placeholder="APELLIDO, Nombre")
             nuevo_ci     = c2.text_input("CI", placeholder="ej: 5123456")
             if st.form_submit_button("✅ Agregar", type="primary", use_container_width=True):
                 if nuevo_nombre.strip():
@@ -713,72 +715,87 @@ def pagina_pasar_lista():
                     except Exception as ex:
                         st.error(f"❌ Error: {ex}")
                 else:
-                    st.warning("⚠️ Ingresá al menos el nombre.")
+                    st.warning("⚠️ Ingresá el nombre.")
 
-    # ── Marcar todos presentes ──
-    if st.button("✅ Marcar todos Presentes"):
-        for _, row in df.iterrows():
-            st.session_state[sk(int(row["estudiante_id"]))] = "P"
-        st.rerun()
+    ca, cb = st.columns(2)
+    with ca:
+        if st.button("✅ Todos Presentes", use_container_width=True):
+            for _, row in df.iterrows():
+                st.session_state[sk(int(row["estudiante_id"]))] = "P"
+            st.rerun()
+    with cb:
+        if st.button("💾 Guardar Asistencia", type="primary", use_container_width=True):
+            registros = [(int(r["estudiante_id"]), fecha_sel,
+                         OPCION_A_ESTADO.get(st.session_state.get(sk(int(r["estudiante_id"])), "P"), "Presente"))
+                         for _, r in df.iterrows()]
+            try:
+                guardar_asistencia(registros, turno=turno_sel)
+                st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
+                st.session_state.pop("metrics_ts", None)
+                st.success(f"✅ Guardado — {grado_sel} {turno_sel} {fecha_sel.strftime('%d/%m/%Y')}")
+                st.balloons()
+            except Exception as ex:
+                st.error(f"❌ {ex}")
 
     st.markdown("---")
 
-    # ── CSS botones P/A/J ──
-    st.markdown("""
-    <style>
-    .btn-p button { background:#2ecc71 !important; color:#fff !important; font-weight:700 !important; border-radius:8px !important; }
-    .btn-a button { background:#e74c3c !important; color:#fff !important; font-weight:700 !important; border-radius:8px !important; }
-    .btn-j button { background:#f39c12 !important; color:#fff !important; font-weight:700 !important; border-radius:8px !important; }
-    .btn-off button { background:transparent !important; font-weight:400 !important; border-radius:8px !important; opacity:0.45 !important; }
-    </style>
-    """, unsafe_allow_html=True)
+    # ── Paginación: 15 alumnos por página ──
+    PAGE_SIZE = 15
+    total_pages = max(1, (len(df) - 1) // PAGE_SIZE + 1)
+    if "lista_pagina" not in st.session_state:
+        st.session_state["lista_pagina"] = 0
+    pag = st.session_state["lista_pagina"]
 
-    # ── Lista alumnos ──
-    for _, row in df.iterrows():
+    if total_pages > 1:
+        pc1, pc2, pc3 = st.columns([1, 3, 1])
+        with pc1:
+            if st.button("◀", disabled=pag == 0, use_container_width=True):
+                st.session_state["lista_pagina"] -= 1
+                st.rerun()
+        with pc2:
+            st.markdown(f"<div style='text-align:center;padding-top:8px'>Página {pag+1} de {total_pages}</div>",
+                        unsafe_allow_html=True)
+        with pc3:
+            if st.button("▶", disabled=pag >= total_pages - 1, use_container_width=True):
+                st.session_state["lista_pagina"] += 1
+                st.rerun()
+
+    df_pag = df.iloc[pag * PAGE_SIZE : (pag + 1) * PAGE_SIZE]
+
+    # ── Lista alumnos (página actual) ──
+    for _, row in df_pag.iterrows():
         eid    = int(row["estudiante_id"])
         nombre = str(row["nombre"])
         ci     = str(row.get("ci", "") or "")
         estado = st.session_state.get(sk(eid), "P")
 
-        c_nom, c_p, c_a, c_j, c_rep = st.columns([5, 1, 1, 1, 1])
+        lbl_p = "🟢 P" if estado == "P" else "P"
+        lbl_a = "🔴 A" if estado == "A" else "A"
+        lbl_j = "🟡 J" if estado == "J" else "J"
 
+        c_nom, c_p, c_a, c_j, c_rep = st.columns([5, 1, 1, 1, 1])
         with c_nom:
             st.markdown(f"**{nombre}**")
             if ci:
                 st.caption(ci)
-
-        # Callbacks sin rerun — actualizan session_state directamente
-        def _set(e, k=sk(eid)):
-            st.session_state[k] = e
-
         with c_p:
-            css = "btn-p" if estado == "P" else "btn-off"
-            st.markdown(f'<div class="{css}">', unsafe_allow_html=True)
-            st.button("P", key=f"p_{eid}", use_container_width=True,
-                      on_click=_set, args=("P",))
-            st.markdown("</div>", unsafe_allow_html=True)
-
+            if st.button(lbl_p, key=f"p_{eid}", use_container_width=True):
+                st.session_state[sk(eid)] = "P"
+                st.rerun()
         with c_a:
-            css = "btn-a" if estado == "A" else "btn-off"
-            st.markdown(f'<div class="{css}">', unsafe_allow_html=True)
-            st.button("A", key=f"a_{eid}", use_container_width=True,
-                      on_click=_set, args=("A",))
-            st.markdown("</div>", unsafe_allow_html=True)
-
+            if st.button(lbl_a, key=f"a_{eid}", use_container_width=True):
+                st.session_state[sk(eid)] = "A"
+                st.rerun()
         with c_j:
-            css = "btn-j" if estado == "J" else "btn-off"
-            st.markdown(f'<div class="{css}">', unsafe_allow_html=True)
-            st.button("J", key=f"j_{eid}", use_container_width=True,
-                      on_click=_set, args=("J",))
-            st.markdown("</div>", unsafe_allow_html=True)
-
+            if st.button(lbl_j, key=f"j_{eid}", use_container_width=True):
+                st.session_state[sk(eid)] = "J"
+                st.rerun()
         with c_rep:
-            if st.button("📋", key=f"rep_{eid}", use_container_width=True, help="Ver reporte"):
+            if st.button("📋", key=f"rep_{eid}", use_container_width=True):
                 cur = st.session_state.get("reporte_eid")
                 st.session_state["reporte_eid"] = None if cur == eid else eid
                 st.rerun()
 
-        # Reporte inline
         if st.session_state.get("reporte_eid") == eid:
             df_rep = get_reporte_estudiante(eid)
             if df_rep.empty:
@@ -787,8 +804,8 @@ def pagina_pasar_lista():
                 presentes    = (df_rep["estado"] == "Presente").sum()
                 ausentes     = (df_rep["estado"] == "Ausente Injustificado").sum()
                 justificados = (df_rep["estado"] == "Ausente Justificado").sum()
-                total = len(df_rep)
-                pct   = round(presentes / total * 100) if total > 0 else 0
+                total_rep    = len(df_rep)
+                pct = round(presentes / total_rep * 100) if total_rep > 0 else 0
                 r1, r2, r3, r4 = st.columns(4)
                 r1.metric("✅ Presentes",    presentes)
                 r2.metric("❌ Ausentes",     ausentes)
@@ -796,6 +813,7 @@ def pagina_pasar_lista():
                 r4.metric("📊 Asistencia",   f"{pct}%")
                 for _, r in df_rep.head(20).iterrows():
                     fstr  = pd.to_datetime(r["fecha"]).strftime("%d/%m/%Y")
+                    trn   = r.get("turno", "")
                     badge = {"Presente": "🟢 PRESENTE",
                              "Ausente Injustificado": "🔴 AUSENTE",
                              "Ausente Justificado":   "🟡 JUSTIFICADO"}.get(r["estado"], r["estado"])
@@ -803,26 +821,10 @@ def pagina_pasar_lista():
                         f'<div style="display:flex;justify-content:space-between;'
                         f'padding:6px 12px;border-radius:6px;margin-bottom:3px;'
                         f'background:rgba(128,128,128,0.07);">'
-                        f'<span>{fstr}</span><span>{badge}</span></div>',
+                        f'<span>{fstr} <small style="opacity:.5">{trn}</small></span>'
+                        f'<span>{badge}</span></div>',
                         unsafe_allow_html=True)
             st.divider()
-
-    # ── Guardar ──
-    st.markdown("---")
-    if st.button("💾 Guardar Asistencia", type="primary", use_container_width=True):
-        registros = []
-        for _, row in df.iterrows():
-            eid    = int(row["estudiante_id"])
-            opcion = st.session_state.get(sk(eid), "P")
-            registros.append((eid, fecha_sel, OPCION_A_ESTADO.get(opcion, "Presente")))
-        try:
-            guardar_asistencia(registros, turno=turno_sel)
-            st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
-            st.session_state.pop("metrics_ts", None)
-            st.success(f"✅ Asistencia guardada — {grado_sel} — {turno_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
-            st.balloons()
-        except Exception as ex:
-            st.error(f"❌ Error al guardar: {ex}")
 
 
 def pagina_resumen():

@@ -1201,11 +1201,12 @@ def main():
     inject_css()
 
     # ── Init BD solo una vez por sesión ──
-    if not st.session_state.get("db_inicializada"):
+    if not st.session_state.get("db_inicializada_v2"):
         try:
             init_db()
             seed_mock_data()
-            st.session_state["db_inicializada"] = True
+            st.session_state["db_inicializada_v2"] = True
+            st.session_state.pop("db_inicializada", None)
         except Exception as e:
             st.error(f"❌ No se pudo conectar a la base de datos.\n\n`{e}`")
             st.stop()

@@ -396,14 +396,14 @@ def agregar_estudiante(nombre, ci, grado_nombre, contacto):
 
 
 def actualizar_estudiante(est_id, nombre, ci, grado_nombre, contacto):
+    est_id   = int(est_id)   # convertir numpy.int64 → int nativo
     nombre   = (nombre   or "").strip()
     ci       = (ci       or "").strip()
     contacto = (contacto or "").strip()
-    # Forzar conexión limpia antes de escribir
     _forzar_nueva_conexion()
     rows = run_query("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
     if rows:
-        grado_id = rows[0]["id"]
+        grado_id = int(rows[0]["id"])
         run_query(
             "UPDATE estudiantes SET nombre=%s,ci=%s,grado_id=%s,contacto=%s WHERE id=%s",
             (nombre, ci, grado_id, contacto, est_id),
@@ -414,6 +414,7 @@ def actualizar_estudiante(est_id, nombre, ci, grado_nombre, contacto):
 
 
 def eliminar_estudiante(est_id):
+    est_id = int(est_id)
     run_query("DELETE FROM asistencia WHERE estudiante_id=%s", (est_id,), fetch=False)
     run_query("DELETE FROM estudiantes WHERE id=%s", (est_id,), fetch=False)
     for k in [k for k in st.session_state if k.startswith("asist_")]:

@@ -172,80 +172,51 @@ def run_df(sql, params=None) -> pd.DataFrame:
 def init_db():
     conn = get_conn()
     with conn.cursor() as cur:
-        # Verificar si las tablas ya existen — si sí, saltar DDL pesado
+        # Check rápido: si ya está migrado completamente, salir inmediatamente
+        try:
+            cur.execute("SELECT valor FROM config WHERE clave='schema_version'")
+            row = cur.fetchone()
+            if row and row[0] == "3":
+                return  # Ya migrado — salida instantánea
+        except Exception:
+            pass
+
+        # Primera vez o migración pendiente — hacer todo
         cur.execute("""
-            SELECT COUNT(*) FROM information_schema.tables
-            WHERE table_schema = 'public'
-            AND table_name IN ('config','grados','estudiantes','asistencia')
+            CREATE TABLE IF NOT EXISTS config (clave TEXT PRIMARY KEY, valor TEXT);
+            CREATE TABLE IF NOT EXISTS grados (
+                id SERIAL PRIMARY KEY, nombre TEXT UNIQUE NOT NULL, nivel TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS estudiantes (
+                id SERIAL PRIMARY KEY, nombre TEXT NOT NULL, ci TEXT,
+                grado_id INTEGER NOT NULL REFERENCES grados(id), contacto TEXT);
+            CREATE TABLE IF NOT EXISTS asistencia (
+                id SERIAL PRIMARY KEY,
+                estudiante_id INTEGER NOT NULL REFERENCES estudiantes(id),
+                fecha DATE NOT NULL, turno TEXT NOT NULL DEFAULT 'Mañana',
+                estado TEXT NOT NULL CHECK(estado IN (
+                    'Presente','Ausente Injustificado','Ausente Justificado')),
+                UNIQUE(estudiante_id, fecha, turno));
         """)
-        tablas_existentes = cur.fetchone()[0]
-
-        if tablas_existentes < 4:
-            # Primera vez — crear todo
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS config (
-                    clave TEXT PRIMARY KEY,
-                    valor TEXT
-                );
-                CREATE TABLE IF NOT EXISTS grados (
-                    id SERIAL PRIMARY KEY,
-                    nombre TEXT UNIQUE NOT NULL,
-                    nivel TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS estudiantes (
-                    id SERIAL PRIMARY KEY,
-                    nombre TEXT NOT NULL,
-                    ci TEXT,
-                    grado_id INTEGER NOT NULL REFERENCES grados(id),
-                    contacto TEXT
-                );
-                CREATE TABLE IF NOT EXISTS asistencia (
-                    id SERIAL PRIMARY KEY,
-                    estudiante_id INTEGER NOT NULL REFERENCES estudiantes(id),
-                    fecha DATE NOT NULL,
-                    estado TEXT NOT NULL CHECK(estado IN (
-                        'Presente','Ausente Injustificado','Ausente Justificado'
-                    )),
-                    UNIQUE(estudiante_id, fecha)
-                );
-            """)
-
-        # Migración: agregar columna turno si no existe
+        cur.execute("ALTER TABLE estudiantes ADD COLUMN IF NOT EXISTS ci TEXT;")
         cur.execute("ALTER TABLE asistencia ADD COLUMN IF NOT EXISTS turno TEXT DEFAULT 'Mañana';")
-        cur.execute("UPDATE asistencia SET turno = 'Mañana' WHERE turno IS NULL;")
-        # Recrear constraint UNIQUE con turno si solo existe el viejo
+        cur.execute("UPDATE asistencia SET turno='Mañana' WHERE turno IS NULL;")
         cur.execute("""
-            DO $do$
-            BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'asistencia_estudiante_id_fecha_key'
-                ) THEN
-                    ALTER TABLE asistencia DROP CONSTRAINT asistencia_estudiante_id_fecha_key;
-                END IF;
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'asistencia_estudiante_id_fecha_turno_key'
-                ) THEN
-                    ALTER TABLE asistencia ADD CONSTRAINT asistencia_estudiante_id_fecha_turno_key
-                        UNIQUE (estudiante_id, fecha, turno);
-                END IF;
+            DO $do$ BEGIN
+                IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='asistencia_estudiante_id_fecha_key')
+                THEN ALTER TABLE asistencia DROP CONSTRAINT asistencia_estudiante_id_fecha_key; END IF;
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='asistencia_estudiante_id_fecha_turno_key')
+                THEN ALTER TABLE asistencia ADD CONSTRAINT asistencia_estudiante_id_fecha_turno_key
+                    UNIQUE(estudiante_id, fecha, turno); END IF;
             END $do$;
         """)
-
-        # Siempre: migración BTC→BC e insertar grados faltantes (rápido con ON CONFLICT)
         cur.execute("UPDATE grados SET nombre=REPLACE(nombre,'BTC','BC'), nivel=REPLACE(nivel,'BTC','BC') WHERE nombre LIKE '%%BTC%%'")
         for nivel, lista in GRADOS.items():
             for grado in lista:
-                cur.execute(
-                    "INSERT INTO grados (nombre, nivel) VALUES (%s, %s) ON CONFLICT (nombre) DO UPDATE SET nivel=EXCLUDED.nivel",
-                    (grado, nivel),
-                )
-        for clave, valor in [("institucion_nombre", "Institución Educativa"), ("institucion_logo", "")]:
-            cur.execute(
-                "INSERT INTO config (clave, valor) VALUES (%s, %s) ON CONFLICT (clave) DO NOTHING",
-                (clave, valor),
-            )
+                cur.execute("INSERT INTO grados (nombre,nivel) VALUES (%s,%s) ON CONFLICT (nombre) DO UPDATE SET nivel=EXCLUDED.nivel", (grado, nivel))
+        for clave, valor in [("institucion_nombre","Institución Educativa"),("institucion_logo","")]:
+            cur.execute("INSERT INTO config (clave,valor) VALUES (%s,%s) ON CONFLICT (clave) DO NOTHING", (clave, valor))
+        # Marcar schema como completamente migrado
+        cur.execute("INSERT INTO config (clave,valor) VALUES ('schema_version','3') ON CONFLICT (clave) DO UPDATE SET valor='3'")
         conn.commit()
 
 

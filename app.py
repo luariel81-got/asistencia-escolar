@@ -1130,6 +1130,8 @@ def pagina_reportes():
         grado_actual = None
         for _, r in df_just.iterrows():
             if r["grado"] != grado_actual:
+                if grado_actual is not None:
+                    lineas.append("")
                 grado_actual = r["grado"]
                 lineas.append(f"*{grado_actual}*")
             lineas.append(f"  • {r['nombre']}")
@@ -1178,6 +1180,8 @@ def pagina_reportes():
         grado_actual = None
         for _, r in df_aus.iterrows():
             if grado_ausentes == "Todos" and r["grado"] != grado_actual:
+                if grado_actual is not None:
+                    lineas2.append("")
                 grado_actual = r["grado"]
                 lineas2.append(f"*{grado_actual}*")
             lineas2.append(f"  • {r['nombre']}")

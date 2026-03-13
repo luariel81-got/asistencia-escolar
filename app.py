@@ -343,6 +343,22 @@ def guardar_un_estado(est_id, fecha, turno, estado):
     """, (int(est_id), fecha, turno, estado), fetch=False)
 
 
+def autoguardar_lista(df, fecha, turno, sk_fn):
+    """Guarda silenciosamente toda la lista actual desde session_state."""
+    OPCION_A_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
+    if df.empty:
+        return
+    registros = []
+    for _, row in df.iterrows():
+        eid    = int(row["estudiante_id"])
+        opcion = st.session_state.get(sk_fn(eid), "P")
+        registros.append((eid, fecha, turno, OPCION_A_ESTADO.get(opcion, "Presente")))
+    try:
+        guardar_asistencia(registros, turno=turno)
+    except Exception:
+        pass  # Silencioso — no interrumpir al usuario
+
+
 def guardar_asistencia(registros, turno="Mañana"):
     conn = get_conn()
     with conn.cursor() as cur:
@@ -680,6 +696,25 @@ def pagina_pasar_lista():
     def sk(eid): return f"est_{grado_sel}_{fecha_sel}_{turno_sel}_{eid}"
 
     df = get_asistencia_fecha(grado_sel, fecha_sel, turno_sel)
+
+    # ── Autoguardar lista anterior si cambió grado/fecha/turno ──
+    prev_key = st.session_state.get("lista_prev_key")
+    cur_key  = f"{grado_sel}|{fecha_sel}|{turno_sel}"
+    if prev_key and prev_key != cur_key:
+        # Recuperar df del grado anterior y guardarlo
+        prev_parts = prev_key.split("|")
+        if len(prev_parts) == 3:
+            prev_grado, prev_fecha_str, prev_turno = prev_parts
+            try:
+                prev_fecha = date.fromisoformat(prev_fecha_str)
+                prev_ck    = f"asist_{prev_grado}_{prev_fecha_str}_{prev_turno}"
+                prev_df    = st.session_state.get(prev_ck)
+                if prev_df is not None and not prev_df.empty:
+                    def prev_sk(eid): return f"est_{prev_grado}_{prev_fecha_str}_{prev_turno}_{eid}"
+                    autoguardar_lista(prev_df, prev_fecha, prev_turno, prev_sk)
+            except Exception:
+                pass
+    st.session_state["lista_prev_key"] = cur_key
 
     # Inicializar estados desde BD solo una vez por grado+fecha+turno
     cache_key   = f"cache_{grado_sel}_{fecha_sel}_{turno_sel}"
@@ -1314,6 +1349,22 @@ def main():
             st.rerun()
 
     pagina = st.session_state["pagina_sel"]
+    # Autoguardar lista si el usuario navega a otra página
+    if pagina != "lista" and st.session_state.get("lista_prev_key"):
+        prev_key = st.session_state.get("lista_prev_key")
+        prev_parts = prev_key.split("|") if prev_key else []
+        if len(prev_parts) == 3:
+            prev_grado, prev_fecha_str, prev_turno = prev_parts
+            try:
+                prev_fecha = date.fromisoformat(prev_fecha_str)
+                prev_ck    = f"asist_{prev_grado}_{prev_fecha_str}_{prev_turno}"
+                prev_df    = st.session_state.get(prev_ck)
+                if prev_df is not None and not prev_df.empty:
+                    def nav_sk(eid): return f"est_{prev_grado}_{prev_fecha_str}_{prev_turno}_{eid}"
+                    autoguardar_lista(prev_df, prev_fecha, prev_turno, nav_sk)
+            except Exception:
+                pass
+
     if pagina == "lista":
         pagina_pasar_lista()
     elif pagina == "reportes":

@@ -400,44 +400,43 @@ def detectar_faltas_consecutivas(grado_nombre=None):
 
 
 def agregar_estudiante(nombre, ci, grado_nombre, contacto):
-    conn = get_conn()
     nombre   = (nombre   or "").strip()
     ci       = (ci       or "").strip()
     contacto = (contacto or "").strip()
-    with conn.cursor() as cur:
-        cur.execute("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
-        row = cur.fetchone()
-        if row:
-            cur.execute(
-                "INSERT INTO estudiantes (nombre,ci,grado_id,contacto) VALUES (%s,%s,%s,%s)",
-                (nombre, ci, row[0], contacto),
-            )
-            conn.commit()
+    rows = run_query("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
+    if rows:
+        grado_id = rows[0]["id"]
+        run_query(
+            "INSERT INTO estudiantes (nombre,ci,grado_id,contacto) VALUES (%s,%s,%s,%s)",
+            (nombre, ci, grado_id, contacto),
+            fetch=False,
+        )
+        for k in [k for k in st.session_state if k.startswith("asist_")]:
+            st.session_state.pop(k, None)
 
 
 def actualizar_estudiante(est_id, nombre, ci, grado_nombre, contacto):
-    conn = get_conn()
-    # Limpiar campos de forma segura (pueden llegar None)
     nombre   = (nombre   or "").strip()
     ci       = (ci       or "").strip()
     contacto = (contacto or "").strip()
-    with conn.cursor() as cur:
-        cur.execute("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
-        row = cur.fetchone()
-        if row:
-            cur.execute(
-                "UPDATE estudiantes SET nombre=%s,ci=%s,grado_id=%s,contacto=%s WHERE id=%s",
-                (nombre, ci, row[0], contacto, est_id),
-            )
-            conn.commit()
+    rows = run_query("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
+    if rows:
+        grado_id = rows[0]["id"]
+        run_query(
+            "UPDATE estudiantes SET nombre=%s,ci=%s,grado_id=%s,contacto=%s WHERE id=%s",
+            (nombre, ci, grado_id, contacto, est_id),
+            fetch=False,
+        )
+        # Invalidar cachés de asistencia que contengan este estudiante
+        for k in [k for k in st.session_state if k.startswith("asist_")]:
+            st.session_state.pop(k, None)
 
 
 def eliminar_estudiante(est_id):
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute("DELETE FROM asistencia WHERE estudiante_id=%s", (est_id,))
-        cur.execute("DELETE FROM estudiantes WHERE id=%s", (est_id,))
-        conn.commit()
+    run_query("DELETE FROM asistencia WHERE estudiante_id=%s", (est_id,), fetch=False)
+    run_query("DELETE FROM estudiantes WHERE id=%s", (est_id,), fetch=False)
+    for k in [k for k in st.session_state if k.startswith("asist_")]:
+        st.session_state.pop(k, None)
 
 
 # ─────────────────────────────────────────────

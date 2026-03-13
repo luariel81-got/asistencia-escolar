@@ -298,13 +298,10 @@ def get_config(clave):
 
 
 def set_config(clave, valor):
-    conn = get_conn()
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO config (clave,valor) VALUES (%s,%s) ON CONFLICT (clave) DO UPDATE SET valor=EXCLUDED.valor",
-            (clave, valor),
-        )
-        conn.commit()
+    run_query(
+        "INSERT INTO config (clave,valor) VALUES (%s,%s) ON CONFLICT (clave) DO UPDATE SET valor=EXCLUDED.valor",
+        (clave, valor), fetch=False,
+    )
 
 
 # ─────────────────────────────────────────────
@@ -312,11 +309,14 @@ def set_config(clave, valor):
 # ─────────────────────────────────────────────
 
 def get_estudiantes_por_grado(grado_nombre):
-    return run_df("""
-        SELECT e.id, e.nombre, e.ci, e.contacto
-        FROM estudiantes e JOIN grados g ON e.grado_id = g.id
-        WHERE g.nombre = %s ORDER BY e.nombre
-    """, (grado_nombre,))
+    ck = f"estxgrado_{grado_nombre}"
+    if ck not in st.session_state:
+        st.session_state[ck] = run_df("""
+            SELECT e.id, e.nombre, e.ci, e.contacto
+            FROM estudiantes e JOIN grados g ON e.grado_id = g.id
+            WHERE g.nombre = %s ORDER BY e.nombre
+        """, (grado_nombre,))
+    return st.session_state[ck]
 
 
 def get_asistencia_fecha(grado_nombre, fecha, turno="Mañana"):
@@ -345,16 +345,19 @@ def guardar_asistencia(registros, turno="Mañana"):
 
 
 def get_resumen_grado(grado_nombre):
-    return run_df("""
-        SELECT e.nombre,
-               COUNT(CASE WHEN a.estado='Presente' THEN 1 END) as presentes,
-               COUNT(CASE WHEN a.estado='Ausente Injustificado' THEN 1 END) as inj,
-               COUNT(CASE WHEN a.estado='Ausente Justificado' THEN 1 END) as just,
-               COUNT(a.id) as total_dias
-        FROM estudiantes e JOIN grados g ON e.grado_id=g.id
-        LEFT JOIN asistencia a ON a.estudiante_id=e.id
-        WHERE g.nombre=%s GROUP BY e.id, e.nombre ORDER BY e.nombre
-    """, (grado_nombre,))
+    ck = f"resumen_{grado_nombre}"
+    if ck not in st.session_state:
+        st.session_state[ck] = run_df("""
+            SELECT e.nombre,
+                   COUNT(CASE WHEN a.estado='Presente' THEN 1 END) as presentes,
+                   COUNT(CASE WHEN a.estado='Ausente Injustificado' THEN 1 END) as inj,
+                   COUNT(CASE WHEN a.estado='Ausente Justificado' THEN 1 END) as just,
+                   COUNT(a.id) as total_dias
+            FROM estudiantes e JOIN grados g ON e.grado_id=g.id
+            LEFT JOIN asistencia a ON a.estudiante_id=e.id
+            WHERE g.nombre=%s GROUP BY e.id, e.nombre ORDER BY e.nombre
+        """, (grado_nombre,))
+    return st.session_state[ck]
 
 
 def get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin):
@@ -369,17 +372,22 @@ def get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin):
 
 
 def get_reporte_estudiante(est_id):
-    """Retorna historial completo de asistencia de un estudiante."""
-    return run_df("""
-        SELECT fecha, estado
-        FROM asistencia
-        WHERE estudiante_id = %s
-        ORDER BY fecha DESC
-        LIMIT 60
-    """, (int(est_id),))
+    ck = f"rep_{est_id}"
+    if ck not in st.session_state:
+        st.session_state[ck] = run_df("""
+            SELECT fecha, turno, estado
+            FROM asistencia
+            WHERE estudiante_id = %s
+            ORDER BY fecha DESC, turno
+            LIMIT 60
+        """, (int(est_id),))
+    return st.session_state[ck]
 
 
 def detectar_faltas_consecutivas(grado_nombre=None):
+    ck = f"alertas_{grado_nombre}"
+    if ck in st.session_state:
+        return st.session_state[ck]
     filtro = "AND g.nombre = %s" if grado_nombre else ""
     params = (grado_nombre,) if grado_nombre else ()
     df = run_df(f"""
@@ -393,7 +401,9 @@ def detectar_faltas_consecutivas(grado_nombre=None):
     """, params)
 
     if df.empty:
-        return pd.DataFrame(columns=["nombre","grado","contacto","faltas_consecutivas","desde"])
+        empty = pd.DataFrame(columns=["nombre","grado","contacto","faltas_consecutivas","desde"])
+        st.session_state[ck] = empty
+        return empty
 
     resultados = []
     for est_id, grupo in df.groupby("estudiante_id"):
@@ -413,7 +423,9 @@ def detectar_faltas_consecutivas(grado_nombre=None):
                 "faltas_consecutivas": racha,
                 "desde": fechas[-1].date() if racha > 1 else fechas[0].date(),
             })
-    return pd.DataFrame(resultados).sort_values("faltas_consecutivas", ascending=False)
+    result = pd.DataFrame(resultados).sort_values("faltas_consecutivas", ascending=False) if resultados else pd.DataFrame(columns=["nombre","grado","contacto","faltas_consecutivas","desde"])
+    st.session_state[ck] = result
+    return result
 
 
 def agregar_estudiante(nombre, ci, grado_nombre, contacto):
@@ -428,7 +440,7 @@ def agregar_estudiante(nombre, ci, grado_nombre, contacto):
             (nombre, ci, grado_id, contacto),
             fetch=False,
         )
-        for k in [k for k in st.session_state if k.startswith("asist_")]:
+        for k in [k for k in st.session_state if k.startswith(("asist_","estxgrado_","resumen_"))]:
             st.session_state.pop(k, None)
 
 
@@ -446,7 +458,7 @@ def actualizar_estudiante(est_id, nombre, ci, grado_nombre, contacto):
             (nombre, ci, grado_id, contacto, est_id),
             fetch=False,
         )
-        for k in [k for k in st.session_state if k.startswith("asist_")]:
+        for k in [k for k in st.session_state if k.startswith(("asist_","estxgrado_","resumen_"))]:
             st.session_state.pop(k, None)
 
 
@@ -454,7 +466,7 @@ def eliminar_estudiante(est_id):
     est_id = int(est_id)
     run_query("DELETE FROM asistencia WHERE estudiante_id=%s", (est_id,), fetch=False)
     run_query("DELETE FROM estudiantes WHERE id=%s", (est_id,), fetch=False)
-    for k in [k for k in st.session_state if k.startswith("asist_")]:
+    for k in [k for k in st.session_state if k.startswith(("asist_","estxgrado_","resumen_"))]:
         st.session_state.pop(k, None)
 
 
@@ -815,7 +827,7 @@ def pagina_pasar_lista():
 
 def pagina_resumen():
     st.header("📊 Resumen por Grado")
-    institucion = get_config("institucion_nombre")
+    institucion = st.session_state.get("cfg_nombre", "Institución Educativa")
 
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:

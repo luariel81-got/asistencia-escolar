@@ -315,13 +315,16 @@ def get_estudiantes_por_grado(grado_nombre):
 
 
 def get_asistencia_fecha(grado_nombre, fecha):
-    return run_df("""
-        SELECT e.id as estudiante_id, e.nombre, e.ci,
-               COALESCE(a.estado, 'Sin registro') as estado
-        FROM estudiantes e JOIN grados g ON e.grado_id = g.id
-        LEFT JOIN asistencia a ON a.estudiante_id = e.id AND a.fecha = %s
-        WHERE g.nombre = %s ORDER BY e.nombre
-    """, (fecha, grado_nombre))
+    cache_k = f"asist_{grado_nombre}_{fecha}"
+    if cache_k not in st.session_state:
+        st.session_state[cache_k] = run_df("""
+            SELECT e.id as estudiante_id, e.nombre, e.ci,
+                   COALESCE(a.estado, 'Sin registro') as estado
+            FROM estudiantes e JOIN grados g ON e.grado_id = g.id
+            LEFT JOIN asistencia a ON a.estudiante_id = e.id AND a.fecha = %s
+            WHERE g.nombre = %s ORDER BY e.nombre
+        """, (fecha, grado_nombre))
+    return st.session_state[cache_k]
 
 
 def guardar_asistencia(registros):
@@ -806,6 +809,10 @@ def pagina_pasar_lista():
             estado_final = OPCION_A_ESTADO.get(opcion, "Presente")
             registros.append((row["estudiante_id"], fecha_sel, estado_final))
         guardar_asistencia(registros)
+        # Invalidar caché para que próxima carga traiga datos frescos
+        cache_k = f"asist_{grado_sel}_{fecha_sel}"
+        st.session_state.pop(cache_k, None)
+        st.session_state.pop("metrics_ts", None)
         st.success(f"✅ Asistencia guardada — {grado_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
         st.balloons()
 
@@ -1072,6 +1079,9 @@ def pagina_configuracion():
             set_config("institucion_nombre", nuevo_nombre.strip())
             if logo_file:
                 set_config("institucion_logo", base64.b64encode(logo_file.read()).decode("utf-8"))
+            # Limpiar caché de configuración para que se recargue
+            st.session_state.pop("cfg_nombre", None)
+            st.session_state.pop("cfg_logo", None)
             st.success("✅ Configuración guardada.")
             st.rerun()
 
@@ -1092,18 +1102,24 @@ def main():
         pagina_login()
         st.stop()
 
-    # ── APP ──
-    try:
-        init_db()
-        seed_mock_data()
-    except Exception as e:
-        st.error(f"❌ No se pudo conectar a la base de datos.\n\n`{e}`")
-        st.stop()
+    # ── APP ── init solo una vez por sesión ──
+    if not st.session_state.get("db_inicializada"):
+        try:
+            init_db()
+            seed_mock_data()
+            st.session_state["db_inicializada"] = True
+        except Exception as e:
+            st.error(f"❌ No se pudo conectar a la base de datos.\n\n`{e}`")
+            st.stop()
 
     inject_css()
 
-    institucion_nombre = get_config("institucion_nombre")
-    logo_b64 = get_config("institucion_logo")
+    # Config en caché — solo consulta si no está en session_state
+    if "cfg_nombre" not in st.session_state:
+        st.session_state["cfg_nombre"] = get_config("institucion_nombre")
+        st.session_state["cfg_logo"]   = get_config("institucion_logo")
+    institucion_nombre = st.session_state["cfg_nombre"]
+    logo_b64           = st.session_state["cfg_logo"]
 
     # CSS para botones de navegación del sidebar
     st.markdown("""
@@ -1169,10 +1185,19 @@ def main():
 
         st.divider()
         st.caption(f"📅 Hoy: {date.today().strftime('%d/%m/%Y')}")
-        n_est = run_df("SELECT COUNT(*) as c FROM estudiantes")["c"][0]
-        n_reg = run_df("SELECT COUNT(*) as c FROM asistencia")["c"][0]
-        st.metric("Total Estudiantes", n_est)
-        st.metric("Registros de Asistencia", n_reg)
+        # Métricas cacheadas — se actualizan cada 5 minutos
+        import time
+        ahora = time.time()
+        if "metrics_ts" not in st.session_state or ahora - st.session_state["metrics_ts"] > 300:
+            try:
+                st.session_state["n_est"] = run_df("SELECT COUNT(*) as c FROM estudiantes")["c"][0]
+                st.session_state["n_reg"] = run_df("SELECT COUNT(*) as c FROM asistencia")["c"][0]
+                st.session_state["metrics_ts"] = ahora
+            except Exception:
+                st.session_state.setdefault("n_est", "—")
+                st.session_state.setdefault("n_reg", "—")
+        st.metric("Total Estudiantes", st.session_state.get("n_est", "—"))
+        st.metric("Registros de Asistencia", st.session_state.get("n_reg", "—"))
         st.divider()
         if st.button("🚪 Cerrar sesión", key="nav_logout"):
             st.session_state["autenticado"] = False

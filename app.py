@@ -621,18 +621,36 @@ def pagina_pasar_lista():
     ESTADO_A_OPCION = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
     OPCION_A_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
 
-    # Clave de sesión con grado+fecha — permite tener varios grados en memoria simultáneamente
     def sk(eid): return f"est_{grado_sel}_{fecha_sel}_{eid}"
 
+    # Recuperar estados guardados del textarea del grado anterior antes de cambiar
+    # Cuando el usuario cambia de grado, el textarea del grado anterior todavía
+    # está en session_state["estados_json_field"] — lo guardamos antes de perderlo
+    prev_grado = st.session_state.get("lista_grado_prev")
+    prev_fecha = st.session_state.get("lista_fecha_prev")
+    if prev_grado and prev_fecha and (prev_grado != grado_sel or prev_fecha != fecha_sel):
+        raw_prev = st.session_state.get("estados_json_field", "")
+        if raw_prev:
+            try:
+                d = json.loads(raw_prev)
+                for eid_str, opcion in d.items():
+                    st.session_state[f"est_{prev_grado}_{prev_fecha}_{eid_str}"] = opcion
+            except Exception:
+                pass
+
+    st.session_state["lista_grado_prev"] = grado_sel
+    st.session_state["lista_fecha_prev"] = fecha_sel
+
+    # Inicializar estados desde BD solo si este grado+fecha no fue cargado antes
+    grados_init = st.session_state.setdefault("grados_init", set())
     cache_key = f"cache_{grado_sel}_{fecha_sel}"
-    if st.session_state.get("lista_cache_key") != cache_key:
+    if cache_key not in grados_init:
         for _, row in df.iterrows():
-            # Solo inicializar si no hay valor previo (preservar cambios del usuario)
             eid = int(row["estudiante_id"])
             if sk(eid) not in st.session_state:
                 e = row["estado"] if row["estado"] in ESTADOS else "Presente"
                 st.session_state[sk(eid)] = ESTADO_A_OPCION.get(e, "P")
-        st.session_state["lista_cache_key"] = cache_key
+        grados_init.add(cache_key)
 
     col_info, col_agregar = st.columns([3, 1])
     with col_info:

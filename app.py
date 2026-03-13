@@ -1101,31 +1101,34 @@ def pagina_gestion():
                             nombre_id = {r["nombre"].strip().upper(): int(r["id"]) for _, r in df_ests.iterrows()}
                             ci_id     = {str(r["ci"]).strip(): int(r["id"]) for _, r in df_ests.iterrows() if r.get("ci")}
 
-                            ok, skip, err = 0, 0, 0
+                            ok, skip = 0, 0
+                            registros_bulk = []
                             for row in rows_xl[1:]:
                                 ci_val = str(row[0] or "").strip()
                                 nombre = str(row[1] or "").strip().upper()
                                 if not nombre:
                                     continue
-                                # Buscar ID por CI primero, luego por nombre
                                 est_id = ci_id.get(ci_val) or nombre_id.get(nombre)
                                 if not est_id:
                                     skip += 1
                                     continue
                                 for ci, fecha in fecha_cols:
                                     val = str(row[ci] or "").strip().upper() if ci < len(row) else ""
-                                    if val not in ("P","A","J"):
-                                        continue
-                                    try:
-                                        run_query("""
-                                            INSERT INTO asistencia (estudiante_id, fecha, turno, estado)
-                                            VALUES (%s,%s,%s,%s)
-                                            ON CONFLICT (estudiante_id, fecha, turno)
-                                            DO UPDATE SET estado=EXCLUDED.estado
-                                        """, (est_id, fecha, turno_xl, ESTADO_MAP[val]), fetch=False)
+                                    if val in ("P","A","J"):
+                                        registros_bulk.append((est_id, fecha, turno_xl, ESTADO_MAP[val]))
                                         ok += 1
-                                    except Exception:
-                                        err += 1
+
+                            # Insertar todo en una sola query bulk
+                            if registros_bulk:
+                                conn = get_conn()
+                                with conn.cursor() as cur:
+                                    psycopg2.extras.execute_values(cur, """
+                                        INSERT INTO asistencia (estudiante_id, fecha, turno, estado)
+                                        VALUES %s
+                                        ON CONFLICT (estudiante_id, fecha, turno)
+                                        DO UPDATE SET estado=EXCLUDED.estado
+                                    """, registros_bulk, page_size=200)
+                                conn.commit()
 
                             # Limpiar cachés
                             for k in [k for k in st.session_state if k.startswith(("asist_","resumen_","rep_","grados_init"))]:

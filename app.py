@@ -629,7 +629,35 @@ def pagina_pasar_lista():
             st.session_state[f"est_{row['estudiante_id']}"] = ESTADO_A_OPCION.get(e, "P")
         st.session_state["lista_cache_key"] = cache_key
 
-    st.markdown(f"**{len(df)} estudiantes** — {grado_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
+    col_info, col_agregar = st.columns([3, 1])
+    with col_info:
+        st.markdown(f"**{len(df)} estudiantes** — {grado_sel} — {fecha_sel.strftime('%d/%m/%Y')}")
+    with col_agregar:
+        if st.button("➕ Agregar alumno", use_container_width=True):
+            st.session_state["mostrar_form_agregar_lista"] = not st.session_state.get("mostrar_form_agregar_lista", False)
+
+    # Formulario rápido para agregar alumno al grado actual
+    if st.session_state.get("mostrar_form_agregar_lista"):
+        with st.form("form_agregar_rapido", clear_on_submit=True):
+            st.markdown(f"**Agregar alumno a {grado_sel}**")
+            c1, c2 = st.columns(2)
+            nuevo_nombre = c1.text_input("Nombre completo", placeholder="APELLIDO, Nombre")
+            nuevo_ci     = c2.text_input("CI", placeholder="ej: 5123456")
+            enviado = st.form_submit_button("✅ Agregar", type="primary", use_container_width=True)
+            if enviado:
+                if nuevo_nombre.strip():
+                    try:
+                        agregar_estudiante(nuevo_nombre.strip().upper(), nuevo_ci.strip(), grado_sel, "")
+                        # Limpiar caché del grado para que aparezca en la lista
+                        st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}", None)
+                        st.session_state.pop("lista_cache_key", None)
+                        st.session_state["mostrar_form_agregar_lista"] = False
+                        st.success(f"✅ {nuevo_nombre.strip().upper()} agregado a {grado_sel}.")
+                        st.rerun()
+                    except Exception as ex:
+                        st.error(f"❌ Error: {ex}")
+                else:
+                    st.warning("⚠️ Ingresá al menos el nombre.")
 
     if st.button("✅ Marcar todos Presentes"):
         for _, row in df.iterrows():

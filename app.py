@@ -629,17 +629,16 @@ def pagina_pasar_lista():
 
     ESTADO_A_OPCION = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
     OPCION_A_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
-    OPCIONES = ["P", "A", "J"]
-    LABELS   = {"P": "✅ Presente", "A": "❌ Ausente", "J": "📝 Justificado"}
 
     def sk(eid): return f"est_{grado_sel}_{fecha_sel}_{eid}"
 
     # Inicializar estados desde BD solo una vez por grado+fecha
-    cache_key  = f"cache_{grado_sel}_{fecha_sel}"
+    cache_key   = f"cache_{grado_sel}_{fecha_sel}"
     grados_init = st.session_state.setdefault("grados_init", set())
     if cache_key not in grados_init and not df.empty:
         for _, row in df.iterrows():
             eid = int(row["estudiante_id"])
+            # Solo setear si no existe — no pisar cambios del usuario
             if sk(eid) not in st.session_state:
                 e = row["estado"] if row["estado"] in ESTADOS else "Presente"
                 st.session_state[sk(eid)] = ESTADO_A_OPCION.get(e, "P")
@@ -685,55 +684,57 @@ def pagina_pasar_lista():
 
     st.markdown("---")
 
-    # ── Lista con radio buttons — UN widget por alumno, sin rerun al cambiar ──
+    # ── CSS botones P/A/J ──
     st.markdown("""
     <style>
-    /* Radio horizontal compacto */
-    div[data-testid="stHorizontalBlock"] .stRadio > div {
-        flex-direction: row !important;
-        gap: 6px !important;
-    }
-    div[data-testid="stHorizontalBlock"] .stRadio label {
-        padding: 4px 10px !important;
-        border-radius: 20px !important;
-        border: 1px solid rgba(128,128,128,0.3) !important;
-        cursor: pointer !important;
-        font-size: 13px !important;
-        min-width: 80px !important;
-        text-align: center !important;
-    }
+    .btn-p button { background:#2ecc71 !important; color:#fff !important; font-weight:700 !important; border-radius:8px !important; }
+    .btn-a button { background:#e74c3c !important; color:#fff !important; font-weight:700 !important; border-radius:8px !important; }
+    .btn-j button { background:#f39c12 !important; color:#fff !important; font-weight:700 !important; border-radius:8px !important; }
+    .btn-off button { background:transparent !important; font-weight:400 !important; border-radius:8px !important; opacity:0.45 !important; }
     </style>
     """, unsafe_allow_html=True)
 
+    # ── Lista alumnos ──
     for _, row in df.iterrows():
         eid    = int(row["estudiante_id"])
         nombre = str(row["nombre"])
         ci     = str(row.get("ci", "") or "")
-        key_r  = sk(eid)
+        estado = st.session_state.get(sk(eid), "P")
 
-        # Inicializar si no existe
-        if key_r not in st.session_state:
-            st.session_state[key_r] = "P"
+        c_nom, c_p, c_a, c_j, c_rep = st.columns([5, 1, 1, 1, 1])
 
-        c_nom, c_radio, c_rep = st.columns([4, 4, 1])
         with c_nom:
             st.markdown(f"**{nombre}**")
             if ci:
                 st.caption(ci)
-        with c_radio:
-            # Radio horizontal sin rerun — el valor queda en session_state directamente
-            idx = OPCIONES.index(st.session_state.get(key_r, "P"))
-            st.radio(
-                label=nombre,
-                options=OPCIONES,
-                format_func=lambda x: LABELS[x],
-                index=idx,
-                key=key_r,
-                label_visibility="collapsed",
-                horizontal=True,
-            )
+
+        # Callbacks sin rerun — actualizan session_state directamente
+        def _set(e, k=sk(eid)):
+            st.session_state[k] = e
+
+        with c_p:
+            css = "btn-p" if estado == "P" else "btn-off"
+            st.markdown(f'<div class="{css}">', unsafe_allow_html=True)
+            st.button("P", key=f"p_{eid}", use_container_width=True,
+                      on_click=_set, args=("P",))
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with c_a:
+            css = "btn-a" if estado == "A" else "btn-off"
+            st.markdown(f'<div class="{css}">', unsafe_allow_html=True)
+            st.button("A", key=f"a_{eid}", use_container_width=True,
+                      on_click=_set, args=("A",))
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with c_j:
+            css = "btn-j" if estado == "J" else "btn-off"
+            st.markdown(f'<div class="{css}">', unsafe_allow_html=True)
+            st.button("J", key=f"j_{eid}", use_container_width=True,
+                      on_click=_set, args=("J",))
+            st.markdown("</div>", unsafe_allow_html=True)
+
         with c_rep:
-            if st.button("📋", key=f"rep_{eid}", help="Ver reporte"):
+            if st.button("📋", key=f"rep_{eid}", use_container_width=True, help="Ver reporte"):
                 cur = st.session_state.get("reporte_eid")
                 st.session_state["reporte_eid"] = None if cur == eid else eid
                 st.rerun()
@@ -748,7 +749,7 @@ def pagina_pasar_lista():
                 ausentes     = (df_rep["estado"] == "Ausente Injustificado").sum()
                 justificados = (df_rep["estado"] == "Ausente Justificado").sum()
                 total = len(df_rep)
-                pct = round(presentes / total * 100) if total > 0 else 0
+                pct   = round(presentes / total * 100) if total > 0 else 0
                 r1, r2, r3, r4 = st.columns(4)
                 r1.metric("✅ Presentes",    presentes)
                 r2.metric("❌ Ausentes",     ausentes)

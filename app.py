@@ -845,7 +845,7 @@ def pagina_pasar_lista():
 
         if st.session_state.get("reporte_eid") == eid:
             df_rep = get_reporte_estudiante(eid)
-            if df_rep.empty:
+            if not isinstance(df_rep, pd.DataFrame) or df_rep.empty:
                 st.info("Sin registros aún.")
             else:
                 presentes    = (df_rep["estado"] == "Presente").sum()

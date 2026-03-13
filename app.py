@@ -162,6 +162,16 @@ def get_conn():
     return conn
 
 
+def _forzar_nueva_conexion():
+    """Cierra y elimina la conexión actual para forzar una nueva."""
+    try:
+        if "db_conn" in st.session_state:
+            st.session_state["db_conn"].close()
+    except Exception:
+        pass
+    st.session_state.pop("db_conn", None)
+
+
 def run_query(sql, params=None, fetch=True):
     for intento in range(3):
         try:
@@ -172,17 +182,8 @@ def run_query(sql, params=None, fetch=True):
                     return cur.fetchall()
                 conn.commit()
                 return None
-        except psycopg2.Error as e:
-            # Forzar reconexión en el próximo intento
-            try:
-                st.session_state["db_conn"].rollback()
-            except Exception:
-                pass
-            try:
-                st.session_state["db_conn"].close()
-            except Exception:
-                pass
-            st.session_state.pop("db_conn", None)
+        except Exception as e:
+            _forzar_nueva_conexion()
             if intento == 2:
                 raise e
     return None
@@ -428,6 +429,8 @@ def actualizar_estudiante(est_id, nombre, ci, grado_nombre, contacto):
     nombre   = (nombre   or "").strip()
     ci       = (ci       or "").strip()
     contacto = (contacto or "").strip()
+    # Forzar conexión limpia antes de escribir
+    _forzar_nueva_conexion()
     rows = run_query("SELECT id FROM grados WHERE nombre=%s", (grado_nombre,))
     if rows:
         grado_id = rows[0]["id"]
@@ -436,7 +439,6 @@ def actualizar_estudiante(est_id, nombre, ci, grado_nombre, contacto):
             (nombre, ci, grado_id, contacto, est_id),
             fetch=False,
         )
-        # Invalidar cachés de asistencia que contengan este estudiante
         for k in [k for k in st.session_state if k.startswith("asist_")]:
             st.session_state.pop(k, None)
 

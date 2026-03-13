@@ -342,6 +342,17 @@ def get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin):
     """, (grado_nombre, fecha_ini, fecha_fin))
 
 
+def get_reporte_estudiante(est_id):
+    """Retorna historial completo de asistencia de un estudiante."""
+    return run_df("""
+        SELECT fecha, estado
+        FROM asistencia
+        WHERE estudiante_id = %s
+        ORDER BY fecha DESC
+        LIMIT 60
+    """, (int(est_id),))
+
+
 def detectar_faltas_consecutivas(grado_nombre=None):
     filtro = "AND g.nombre = %s" if grado_nombre else ""
     params = (grado_nombre,) if grado_nombre else ()
@@ -697,6 +708,9 @@ def pagina_pasar_lista():
         estado = st.session_state.get(sk(eid), "P")
         alumnos_js.append({"id": eid, "nombre": nombre, "ci": ci, "estado": estado})
 
+    # Reporte individual — si hay alumno seleccionado mostrar debajo del JS
+    reporte_eid = st.session_state.get("reporte_eid")
+
     import json
     alumnos_json = json.dumps(alumnos_js, ensure_ascii=False)
 
@@ -741,6 +755,16 @@ def pagina_pasar_lista():
     .btn-A.activo {{ background: #e74c3c; color: #fff; }}
     .btn-J {{ border-color: #f39c12; color: #f39c12; }}
     .btn-J.activo {{ background: #f39c12; color: #fff; }}
+    .ver-reporte {{
+        font-size: 11px;
+        color: #7c6af7;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0;
+        margin-top: 2px;
+        text-decoration: underline;
+    }}
     </style>
 
     <div class="lista-wrap" id="lista-container"></div>
@@ -762,6 +786,7 @@ def pagina_pasar_lista():
                 <div class="alumno-info">
                     <div class="alumno-nombre">${{a.nombre}}</div>
                     ${{a.ci ? `<div class="alumno-ci">${{a.ci}}</div>` : ""}}
+                    <button class="ver-reporte" onclick="verReporte(${{a.id}}, '${{a.nombre}}')">📋 Ver Reporte</button>
                 </div>
                 <div class="paj-group">
                     <button class="paj-btn btn-P ${{est==="P"?"activo":""}}"
@@ -797,14 +822,73 @@ def pagina_pasar_lista():
             document.documentElement.style.setProperty("--txt", "#f0f2f6");
         }}
     }}
+    function verReporte(id, nombre) {{
+        window.parent.postMessage({{type: "streamlit:setComponentValue", value: "reporte:" + id}}, "*");
+    }}
     applyTheme();
     render();
     </script>
     """
 
     # Renderizar con altura dinámica según cantidad de alumnos
-    altura = min(max(len(df) * 68, 200), 700)
+    altura = min(max(len(df) * 80, 200), 700)
     resultado = st.components.v1.html(componente_html, height=altura, scrolling=True)
+
+    # Capturar si se tocó "Ver Reporte" desde el JS (viene como "reporte:ID")
+    if resultado and isinstance(resultado, str) and resultado.startswith("reporte:"):
+        try:
+            st.session_state["reporte_eid"] = int(resultado.split(":")[1])
+        except Exception:
+            pass
+
+    # Panel de reporte individual
+    if reporte_eid:
+        alumno_row = df[df["estudiante_id"] == reporte_eid]
+        if not alumno_row.empty:
+            nombre_rep = alumno_row.iloc[0]["nombre"]
+            df_rep = get_reporte_estudiante(reporte_eid)
+            with st.container():
+                st.markdown("---")
+                col_tit, col_cerrar = st.columns([5, 1])
+                with col_tit:
+                    st.markdown(f"### 📋 {nombre_rep}")
+                with col_cerrar:
+                    if st.button("✖ Cerrar", key="cerrar_reporte"):
+                        st.session_state["reporte_eid"] = None
+                        st.rerun()
+                if df_rep.empty:
+                    st.info("Sin registros de asistencia aún.")
+                else:
+                    presentes    = (df_rep["estado"] == "Presente").sum()
+                    ausentes     = (df_rep["estado"] == "Ausente Injustificado").sum()
+                    justificados = (df_rep["estado"] == "Ausente Justificado").sum()
+                    total = len(df_rep)
+                    pct = round(presentes / total * 100) if total > 0 else 0
+
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("✅ Presentes",    presentes)
+                    c2.metric("❌ Ausentes",     ausentes)
+                    c3.metric("📝 Justificados", justificados)
+                    c4.metric("📊 Asistencia",   f"{pct}%")
+
+                    st.markdown("**Historial reciente:**")
+                    for _, r in df_rep.iterrows():
+                        fecha_str = pd.to_datetime(r["fecha"]).strftime("%d/%m/%Y")
+                        estado = r["estado"]
+                        if estado == "Presente":
+                            badge = "🟢 PRESENTE"
+                        elif estado == "Ausente Injustificado":
+                            badge = "🔴 AUSENTE"
+                        else:
+                            badge = "🟡 JUSTIFICADO"
+                        st.markdown(
+                            f'<div style="display:flex;justify-content:space-between;'
+                            f'padding:8px 12px;border-radius:8px;margin-bottom:4px;'
+                            f'background:rgba(128,128,128,0.07);">'
+                            f'<span style="font-weight:500">{fecha_str}</span>'
+                            f'<span>{badge}</span></div>',
+                            unsafe_allow_html=True
+                        )
 
     # Campo oculto donde JS deposita los estados actuales al guardar
     # Campo oculto — CSS por key específico, no afecta otros textareas

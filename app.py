@@ -370,9 +370,9 @@ def get_asistencia_rango(grado_nombre, fecha_ini, fecha_fin):
 
 def get_reporte_estudiante(est_id):
     ck = f"rep_{est_id}"
-    # Solo cachear si tiene datos — si está vacío consultar siempre
-    if ck in st.session_state and not st.session_state[ck].empty:
-        return st.session_state[ck]
+    cached = st.session_state.get(ck)
+    if isinstance(cached, pd.DataFrame) and not cached.empty:
+        return cached
     result = run_df("""
         SELECT fecha, turno, estado
         FROM asistencia
@@ -380,9 +380,9 @@ def get_reporte_estudiante(est_id):
         ORDER BY fecha DESC, turno
         LIMIT 60
     """, (int(est_id),))
-    if not result.empty:
+    if isinstance(result, pd.DataFrame) and not result.empty:
         st.session_state[ck] = result
-    return result
+    return result if isinstance(result, pd.DataFrame) else pd.DataFrame()
 
 
 def detectar_faltas_consecutivas(grado_nombre=None):

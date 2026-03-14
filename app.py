@@ -391,7 +391,7 @@ def detectar_faltas_consecutivas(grado_nombre=None):
         FROM asistencia a
         JOIN estudiantes e ON a.estudiante_id=e.id
         JOIN grados g ON e.grado_id=g.id
-        WHERE a.estado LIKE 'Ausente%%' {filtro}
+        WHERE a.estado = 'Ausente Injustificado' {filtro}
         ORDER BY e.id, a.fecha DESC
     """, params)
 
@@ -724,7 +724,11 @@ def panel_notificaciones():
         import time
         if ck not in st.session_state or time.time() - st.session_state.get(f"{ck}_ts", 0) > 300:
             df_cons = detectar_faltas_consecutivas()
-            df_cons3 = df_cons[df_cons["faltas_consecutivas"] >= 3] if not df_cons.empty else pd.DataFrame()
+            if not df_cons.empty:
+                # Solo ausencias injustificadas
+                df_cons3 = df_cons[df_cons["faltas_consecutivas"] >= 3]
+            else:
+                df_cons3 = pd.DataFrame()
             st.session_state[f"{ck}_ts"] = time.time()
             st.session_state[ck] = len(df_cons3)
             st.session_state[f"{ck}_nombres"] = df_cons3["nombre"].tolist() if not df_cons3.empty else []

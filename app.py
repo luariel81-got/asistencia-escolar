@@ -694,6 +694,60 @@ def inject_css():
 
 # ─────────────────────────────────────────────
 # PÁGINAS
+
+def panel_notificaciones():
+    """Panel de notificaciones que aparece en todas las páginas."""
+    hoy = date.today()
+
+    alertas = []
+
+    # ── 1. Recordatorio: grados sin lista hoy ──
+    try:
+        df_hoy = run_df("""
+            SELECT DISTINCT g.nombre as grado
+            FROM asistencia a
+            JOIN estudiantes e ON a.estudiante_id = e.id
+            JOIN grados g ON e.grado_id = g.id
+            WHERE a.fecha = %s
+        """, (hoy,))
+        grados_con_lista = set(df_hoy["grado"].tolist()) if not df_hoy.empty else set()
+        grados_sin_lista = [g for g in TODOS_LOS_GRADOS if g not in grados_con_lista]
+        if grados_sin_lista:
+            alertas.append(("⏰", "warning",
+                f"Sin lista hoy ({hoy.strftime('%d/%m')}): **{', '.join(grados_sin_lista)}**"))
+    except Exception:
+        pass
+
+    # ── 2. Alumnos con 3+ faltas consecutivas ──
+    try:
+        ck = "notif_faltas"
+        import time
+        if ck not in st.session_state or time.time() - st.session_state.get(f"{ck}_ts", 0) > 300:
+            df_cons = detectar_faltas_consecutivas()
+            df_cons3 = df_cons[df_cons["faltas_consecutivas"] >= 3] if not df_cons.empty else pd.DataFrame()
+            st.session_state[f"{ck}_ts"] = time.time()
+            st.session_state[ck] = len(df_cons3)
+            st.session_state[f"{ck}_nombres"] = df_cons3["nombre"].tolist() if not df_cons3.empty else []
+        n_cons = st.session_state.get(ck, 0)
+        nombres_cons = st.session_state.get(f"{ck}_nombres", [])
+        if n_cons > 0:
+            alertas.append(("🚨", "error",
+                f"**{n_cons} alumno(s)** con 3+ faltas consecutivas: {', '.join(nombres_cons[:3])}{'...' if len(nombres_cons)>3 else ''}"))
+    except Exception:
+        pass
+
+    # ── Mostrar panel solo si hay alertas ──
+    if not alertas:
+        return
+
+    for icono, tipo, msg in alertas:
+        if tipo == "error":
+            st.error(f"{icono} {msg}")
+        elif tipo == "warning":
+            st.warning(f"{icono} {msg}")
+        else:
+            st.info(f"{icono} {msg}")
+
 # ─────────────────────────────────────────────
 
 def pagina_pasar_lista():
@@ -794,8 +848,12 @@ def pagina_pasar_lista():
                 guardar_asistencia(registros, turno=turno_sel)
                 st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
                 st.session_state.pop("metrics_ts", None)
-                st.success(f"✅ Lista completa guardada — {grado_sel} {turno_sel} {fecha_sel.strftime('%d/%m/%Y')}")
+                aus_n  = sum(1 for _, r in df.iterrows() if OPCION_A_ESTADO.get(st.session_state.get(sk(int(r["estudiante_id"])),"P"),"Presente") == "Ausente Injustificado")
+                just_n = sum(1 for _, r in df.iterrows() if OPCION_A_ESTADO.get(st.session_state.get(sk(int(r["estudiante_id"])),"P"),"Presente") == "Ausente Justificado")
+                pres_n = len(df) - aus_n - just_n
+                st.success(f"✅ **{grado_sel} · {turno_sel} · {fecha_sel.strftime('%d/%m/%Y')}** — {pres_n} presentes · {aus_n} ausentes · {just_n} justificados")
                 st.balloons()
+                st.session_state.pop("notif_faltas", None)
             except Exception as ex:
                 st.error(f"❌ {ex}")
 
@@ -1477,6 +1535,9 @@ def main():
             st.session_state["autenticado"] = False
             st.query_params.clear()
             st.rerun()
+
+    # ── Panel de notificaciones ──
+    panel_notificaciones()
 
     pagina = st.session_state["pagina_sel"]
     # Autoguardar lista si el usuario navega a otra página

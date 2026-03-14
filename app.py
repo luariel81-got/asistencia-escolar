@@ -10,6 +10,11 @@ import psycopg2.extras
 import pandas as pd
 import plotly.express as px
 from datetime import date, timedelta
+from datetime import datetime as _datetime
+import pytz as _pytz
+
+def hoy_py():
+    return _datetime.now(_pytz.timezone("America/Asuncion")).date()
 import random
 import io
 import base64
@@ -697,7 +702,7 @@ def inject_css():
 
 def panel_notificaciones():
     """Panel de notificaciones que aparece en todas las páginas."""
-    hoy = date.today()
+    hoy = hoy_py()
 
     alertas = []
 
@@ -763,7 +768,7 @@ def pagina_pasar_lista():
     with col2:
         turno_sel = st.radio("Turno", TURNOS, horizontal=True, key="lista_turno")
     with col3:
-        fecha_sel = st.date_input("Fecha", value=date.today(), key="lista_fecha")
+        fecha_sel = st.date_input("Fecha", value=hoy_py(), key="lista_fecha")
 
     ESTADO_A_OPCION = {"Presente": "P", "Ausente Injustificado": "A", "Ausente Justificado": "J"}
     OPCION_A_ESTADO = {"P": "Presente", "A": "Ausente Injustificado", "J": "Ausente Justificado"}
@@ -944,7 +949,7 @@ def pagina_resumen():
     with col2:
         fecha_ini = st.date_input("Desde", value=date.today().replace(day=1), key="res_ini")
     with col3:
-        fecha_fin = st.date_input("Hasta", value=date.today(), key="res_fin")
+        fecha_fin = st.date_input("Hasta", value=hoy_py(), key="res_fin")
 
     df = get_resumen_grado(grado_sel)
     if df.empty or df["total_dias"].sum() == 0:
@@ -996,7 +1001,7 @@ def pagina_resumen():
     st.divider()
     st.subheader("📥 Exportar a Excel")
     periodo = st.radio("Período", ["Día","Semana","Mes","Personalizado"], horizontal=True)
-    hoy = date.today()
+    hoy = hoy_py()
     if periodo == "Día":
         f_ini, f_fin = hoy, hoy
     elif periodo == "Semana":
@@ -1117,7 +1122,7 @@ def pagina_gestion():
                 header  = rows_xl[0]
 
                 # Detectar columnas de fecha (col 3 en adelante, hasta las de totales)
-                año = _date.today().year
+                año = _datetime.now(_pytz.timezone("America/Asuncion")).year
                 fecha_cols = []
                 for ci, h in enumerate(header):
                     if h and str(h).strip() and "/" in str(h):
@@ -1320,7 +1325,7 @@ def pagina_reportes():
 
     col1, col2 = st.columns([2, 1])
     with col1:
-        fecha_sel = st.date_input("Fecha del reporte", value=date.today(), key="rep_fecha")
+        fecha_sel = st.date_input("Fecha del reporte", value=hoy_py(), key="rep_fecha")
     with col2:
         grado_ausentes = st.selectbox("Grado (ausentes)", ["Todos"] + TODOS_LOS_GRADOS, key="rep_grado")
 
@@ -1520,7 +1525,7 @@ def main():
             st.markdown("</div>", unsafe_allow_html=True)
 
         st.divider()
-        st.caption(f"📅 Hoy: {date.today().strftime('%d/%m/%Y')}")
+        st.caption(f"📅 Hoy: {hoy_py().strftime('%d/%m/%Y')}")
         # Métricas cacheadas — se actualizan cada 5 minutos
         import time
         ahora = time.time()

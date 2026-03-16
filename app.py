@@ -1421,21 +1421,6 @@ def pagina_gestion():
 
                 st.markdown("<hr style='margin:4px 0;opacity:0.1'>", unsafe_allow_html=True)
 
-    with tabs[4]:
-        st.subheader("🗑️ Eliminar estudiante")
-        grado_del = st.selectbox("Grado", TODOS_LOS_GRADOS, key="eliminar_grado_sel")
-        df_del = get_estudiantes_por_grado(grado_del)
-        if df_del.empty:
-            st.info(f"No hay estudiantes en {grado_del}.")
-        else:
-            for _, row in df_del.iterrows():
-                c1, c2, c3 = st.columns([3,2,1])
-                c1.write(f"👤 {row['nombre']}")
-                c2.write(f"🪪 {row.get('ci','') or '—'}")
-                if c3.button("🗑️", key=f"del_{row['id']}"):
-                    eliminar_estudiante(row["id"])
-                    st.rerun()
-
     with tabs[5]:
         st.subheader("🗑️ Eliminar Estudiante")
         st.warning("⚠️ Esta acción elimina al alumno y **todo su historial de asistencia**. No se puede deshacer.")

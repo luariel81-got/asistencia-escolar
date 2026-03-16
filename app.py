@@ -906,9 +906,9 @@ body {{ font-family: Arial, sans-serif; background: transparent; }}
 .nombre {{
     font-size: 14px; font-weight: 700;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    color: #f0f2f6;
+    color: var(--txt, #0f1117);
 }}
-.ci {{ font-size: 11px; color: #aaa; margin-top: 1px; }}
+.ci {{ font-size: 11px; color: var(--txt-soft, #555); margin-top: 1px; }}
 .btns {{ display: flex; gap: 6px; flex-shrink: 0; }}
 .btn {{
     width: 44px; height: 44px; border-radius: 8px;
@@ -925,13 +925,13 @@ body {{ font-family: Arial, sans-serif; background: transparent; }}
 .btn-J.on {{ background: #f39c12; color: #fff; }}
 .btn-r {{ width: 36px; height: 44px; border-radius: 8px; border: 1px solid #555;
           background: transparent; color: #aaa; cursor: pointer; font-size: 16px; }}
-.reporte {{ background: rgba(255,255,255,0.05); border-radius: 8px;
-            padding: 10px; margin: 4px 0 8px 0; font-size: 13px; color: #ddd; }}
+.reporte {{ background: rgba(128,128,128,0.08); border-radius: 8px;
+            padding: 10px; margin: 4px 0 8px 0; font-size: 13px; color: var(--txt, #0f1117); }}
 .metric {{ display: inline-block; text-align: center; margin-right: 16px; }}
-.metric-val {{ font-size: 20px; font-weight: 700; color: #fff; }}
-.metric-lbl {{ font-size: 11px; color: #aaa; }}
+.metric-val {{ font-size: 20px; font-weight: 700; color: var(--txt, #0f1117); }}
+.metric-lbl {{ font-size: 11px; color: var(--txt-soft, #555); }}
 .hist-row {{ display: flex; justify-content: space-between; padding: 5px 8px;
-             border-radius: 5px; margin-bottom: 2px; background: rgba(255,255,255,0.05); }}
+             border-radius: 5px; margin-bottom: 2px; background: rgba(128,128,128,0.07); }}
 </style>
 </head>
 <body>
@@ -1011,6 +1011,22 @@ function render() {{
     syncOutput();
 }}
 
+// Detectar tema del padre y aplicar variables CSS
+(function() {{
+    try {{
+        const bg = window.parent.document.body.style.backgroundColor ||
+                   window.getComputedStyle(window.parent.document.body).backgroundColor;
+        const isDark = bg.includes('14, 17') || bg.includes('rgb(14') || bg.includes('#0e1117')
+                    || bg.includes('38, 39') || bg.includes('26, 28');
+        document.documentElement.style.setProperty('--txt',      isDark ? '#f0f2f6' : '#0f1117');
+        document.documentElement.style.setProperty('--txt-soft', isDark ? '#aaa'    : '#555');
+        document.body.style.background = 'transparent';
+    }} catch(e) {{
+        // fallback: usar color oscuro (modo claro es más común)
+        document.documentElement.style.setProperty('--txt',      '#0f1117');
+        document.documentElement.style.setProperty('--txt-soft', '#555');
+    }}
+}})();
 render();
 </script>
 </body>

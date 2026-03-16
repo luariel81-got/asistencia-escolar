@@ -1436,6 +1436,35 @@ def pagina_gestion():
                     eliminar_estudiante(row["id"])
                     st.rerun()
 
+    with tabs[5]:
+        st.subheader("🗑️ Eliminar Estudiante")
+        st.warning("⚠️ Esta acción elimina al alumno y **todo su historial de asistencia**. No se puede deshacer.")
+        grado_del = st.selectbox("Grado", TODOS_LOS_GRADOS, key="del_grado")
+        df_del = get_estudiantes_por_grado(grado_del)
+        if df_del.empty:
+            st.info(f"No hay estudiantes en {grado_del}.")
+        else:
+            alumno_del = st.selectbox(
+                "Seleccionar alumno a eliminar",
+                df_del["nombre"].tolist(),
+                key="alumno_del"
+            )
+            ar_del = df_del[df_del["nombre"] == alumno_del].iloc[0]
+            st.markdown(f"**Alumno:** {ar_del['nombre']}")
+            st.markdown(f"**CI:** {ar_del.get('ci', '—') or '—'}")
+            st.markdown(f"**Grado:** {grado_del}")
+
+            confirmar = st.checkbox(f"Confirmo que quiero eliminar a **{alumno_del}**")
+            if st.button("🗑️ Eliminar definitivamente", type="primary", disabled=not confirmar):
+                try:
+                    eliminar_estudiante(ar_del["id"])
+                    for k in [k for k in st.session_state if k.startswith(("asist_","estxgrado_","resumen_"))]:
+                        st.session_state.pop(k, None)
+                    st.success(f"✅ **{alumno_del}** eliminado correctamente.")
+                    st.rerun()
+                except Exception as ex:
+                    st.error(f"❌ Error: {ex}")
+
 
 def pagina_configuracion():
     st.header("⚙️ Configuración Institucional")

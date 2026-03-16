@@ -887,15 +887,12 @@ def pagina_pasar_lista():
         with c_p:
             if st.button(lbl_p, key=f"p_{eid}", use_container_width=True):
                 st.session_state[sk(eid)] = "P"
-                st.rerun()
         with c_a:
             if st.button(lbl_a, key=f"a_{eid}", use_container_width=True):
                 st.session_state[sk(eid)] = "A"
-                st.rerun()
         with c_j:
             if st.button(lbl_j, key=f"j_{eid}", use_container_width=True):
                 st.session_state[sk(eid)] = "J"
-                st.rerun()
         with c_rep:
             if st.button("📋", key=f"rep_{eid}", use_container_width=True):
                 cur = st.session_state.get("reporte_eid")

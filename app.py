@@ -887,20 +887,14 @@ def pagina_pasar_lista():
         with c_p:
             if st.button(lbl_p, key=f"p_{eid}", use_container_width=True):
                 st.session_state[sk(eid)] = "P"
-                guardar_un_estado(eid, fecha_sel, turno_sel, "Presente")
-                st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
                 st.rerun()
         with c_a:
             if st.button(lbl_a, key=f"a_{eid}", use_container_width=True):
                 st.session_state[sk(eid)] = "A"
-                guardar_un_estado(eid, fecha_sel, turno_sel, "Ausente Injustificado")
-                st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
                 st.rerun()
         with c_j:
             if st.button(lbl_j, key=f"j_{eid}", use_container_width=True):
                 st.session_state[sk(eid)] = "J"
-                guardar_un_estado(eid, fecha_sel, turno_sel, "Ausente Justificado")
-                st.session_state.pop(f"asist_{grado_sel}_{fecha_sel}_{turno_sel}", None)
                 st.rerun()
         with c_rep:
             if st.button("📋", key=f"rep_{eid}", use_container_width=True):

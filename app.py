@@ -878,166 +878,38 @@ def pagina_pasar_lista():
 
     st.markdown("---")
 
-    # ── Construir datos para el componente HTML ──
-    estados_iniciales = {}
-    alumnos_js = []
+    # ── Lista con botones nativos — sin rerun al marcar ──
     for _, row in df.iterrows():
         eid    = int(row["estudiante_id"])
         nombre = str(row["nombre"])
         ci     = str(row.get("ci", "") or "")
         estado = st.session_state.get(sk(eid), "P")
-        estados_iniciales[str(eid)] = estado
-        alumnos_js.append({"id": eid, "nombre": nombre, "ci": ci, "estado": estado})
 
-    alumnos_json   = json.dumps(alumnos_js, ensure_ascii=False)
-    estados_init_j = json.dumps(estados_iniciales, ensure_ascii=False)
-    altura = min(max(len(df) * 72, 300), 800)
-    textarea_key = f"estados_html_{grado_sel}_{fecha_sel}_{turno_sel}"
+        lbl_p = "🟢 P" if estado == "P" else "P"
+        lbl_a = "🔴 A" if estado == "A" else "A"
+        lbl_j = "🟡 J" if estado == "J" else "J"
 
-    # Textarea oculto — JS lo actualiza, Python lo lee al guardar
-    st.markdown("""
-    <style>
-    [data-testid="stTextArea"] { display: none !important; height: 0 !important;
-        overflow: hidden !important; margin: 0 !important; padding: 0 !important; }
-    </style>""", unsafe_allow_html=True)
+        c_nom, c_p, c_a, c_j, c_rep = st.columns([5, 1, 1, 1, 1])
+        with c_nom:
+            st.markdown(f"**{nombre}**")
+            if ci:
+                st.caption(ci)
 
-    estados_raw = st.text_area(
-        "estados_html",
-        value=estados_init_j,
-        key=textarea_key,
-        label_visibility="collapsed",
-        height=1,
-    )
+        def _set_p(k=sk(eid)): st.session_state[k] = "P"
+        def _set_a(k=sk(eid)): st.session_state[k] = "A"
+        def _set_j(k=sk(eid)): st.session_state[k] = "J"
 
-    # Persistir en session_state lo que ya está en el textarea
-    try:
-        d = json.loads(estados_raw)
-        for eid_str, opcion in d.items():
-            st.session_state[sk(int(eid_str))] = opcion
-        st.session_state["estados_html_json"] = estados_raw
-    except Exception:
-        pass
-
-    componente_html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: Arial, sans-serif; background: transparent; }}
-.row {{
-    display: flex; align-items: center;
-    padding: 10px 4px;
-    border-bottom: 1px solid rgba(128,128,128,0.15);
-    gap: 8px;
-}}
-.info {{ flex: 1; min-width: 0; }}
-.nombre {{
-    font-size: 14px; font-weight: 700;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    color: var(--txt, #0f1117);
-}}
-.ci {{ font-size: 11px; color: var(--txt-soft, #555); margin-top: 1px; }}
-.btns {{ display: flex; gap: 6px; flex-shrink: 0; }}
-.btn {{
-    width: 44px; height: 44px; border-radius: 8px;
-    border: 2px solid; font-weight: 700; font-size: 15px;
-    cursor: pointer; background: transparent;
-    transition: background 0.1s, color 0.1s;
-    display: flex; align-items: center; justify-content: center;
-}}
-.btn-P {{ border-color: #2ecc71; color: #2ecc71; }}
-.btn-P.on {{ background: #2ecc71; color: #fff; }}
-.btn-A {{ border-color: #e74c3c; color: #e74c3c; }}
-.btn-A.on {{ background: #e74c3c; color: #fff; }}
-.btn-J {{ border-color: #f39c12; color: #f39c12; }}
-.btn-J.on {{ background: #f39c12; color: #fff; }}
-.btn-r {{ width: 36px; height: 44px; border-radius: 8px; border: 1px solid #555;
-          background: transparent; color: #aaa; cursor: pointer; font-size: 16px; }}
-</style>
-</head>
-<body>
-<div id="lista"></div>
-<script>
-const alumnos = {alumnos_json};
-const estados = {estados_init_j};
-
-function syncToStreamlit() {{
-    // Escribir en el textarea de Streamlit via el DOM del padre
-    try {{
-        const iframes = window.parent.document.querySelectorAll('iframe');
-        // Buscar el textarea por su valor actual
-        const textareas = window.parent.document.querySelectorAll('textarea');
-        for(const ta of textareas) {{
-            if(ta.style.display === 'none' || ta.closest('[style*="display: none"]')) continue;
-            // Es el textarea oculto de estados
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLTextAreaElement.prototype, 'value').set;
-            nativeInputValueSetter.call(ta, JSON.stringify(estados));
-            ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            break;
-        }}
-    }} catch(e) {{}}
-}}
-
-function marcar(id, val) {{
-    estados[id] = val;
-    ["P","A","J"].forEach(v => {{
-        const btn = document.getElementById("btn-"+v+"-"+id);
-        if(btn) btn.className = "btn btn-"+v+(v===val?" on":"");
-    }});
-    syncToStreamlit();
-}}
-
-function render() {{
-    const lista = document.getElementById("lista");
-    lista.innerHTML = "";
-    alumnos.forEach(a => {{
-        const est = estados[a.id] || "P";
-        const row = document.createElement("div");
-        row.className = "row";
-        row.innerHTML = `
-            <div class="info">
-                <div class="nombre">${{a.nombre}}</div>
-                ${{a.ci ? `<div class="ci">${{a.ci}}</div>` : ""}}
-            </div>
-            <div class="btns">
-                <button id="btn-P-${{a.id}}" class="btn btn-P${{est==="P"?" on":""}}" onclick="marcar(${{a.id}},'P')">P</button>
-                <button id="btn-A-${{a.id}}" class="btn btn-A${{est==="A"?" on":""}}" onclick="marcar(${{a.id}},'A')">A</button>
-                <button id="btn-J-${{a.id}}" class="btn btn-J${{est==="J"?" on":""}}" onclick="marcar(${{a.id}},'J')">J</button>
-            </div>`;
-        lista.appendChild(row);
-    }});
-}}
-
-// Detectar tema
-(function() {{
-    try {{
-        const bg = window.parent.getComputedStyle(window.parent.document.body).backgroundColor;
-        const isDark = bg.includes('14, 17') || bg.includes('38, 39') || bg.includes('26, 28');
-        document.documentElement.style.setProperty('--txt',      isDark ? '#f0f2f6' : '#0f1117');
-        document.documentElement.style.setProperty('--txt-soft', isDark ? '#aaa'    : '#555');
-    }} catch(e) {{
-        document.documentElement.style.setProperty('--txt', '#0f1117');
-        document.documentElement.style.setProperty('--txt-soft', '#555');
-    }}
-}})();
-
-render();
-</script>
-</body>
-</html>"""
-
-    st.components.v1.html(componente_html, height=altura, scrolling=True)
-
-    # Leer estados actualizados del textarea para el botón guardar
-    try:
-        estados_actuales = json.loads(st.session_state.get(textarea_key, estados_init_j))
-        for eid_str, opcion in estados_actuales.items():
-            st.session_state[sk(int(eid_str))] = opcion
-        st.session_state["estados_html_json"] = json.dumps(estados_actuales)
-    except Exception:
-        pass
+        with c_p:
+            st.button(lbl_p, key=f"p_{eid}", use_container_width=True, on_click=_set_p)
+        with c_a:
+            st.button(lbl_a, key=f"a_{eid}", use_container_width=True, on_click=_set_a)
+        with c_j:
+            st.button(lbl_j, key=f"j_{eid}", use_container_width=True, on_click=_set_j)
+        with c_rep:
+            if st.button("📋", key=f"rep_{eid}", use_container_width=True):
+                cur = st.session_state.get("reporte_eid")
+                st.session_state["reporte_eid"] = None if cur == eid else eid
+                st.rerun()
     # ── Reporte individual (fuera del iframe) ──
     reporte_eid = st.session_state.get("reporte_eid")
     if reporte_eid:

@@ -847,14 +847,15 @@ def pagina_pasar_lista():
                 st.session_state[sk(int(row["estudiante_id"]))] = "P"
             st.rerun()
     with cb:
-        # Leer estados del componente HTML al guardar
-        estados_guardados = st.session_state.get("estados_html_json", "{}")
         if st.button("💾 Guardar todo", type="primary", use_container_width=True):
+            # Leer estados del textarea (más confiable que postMessage)
+            textarea_key_g = f"estados_html_{grado_sel}_{fecha_sel}_{turno_sel}"
+            raw_g = st.session_state.get(textarea_key_g, "{}")
             try:
-                estados_dict = json.loads(estados_guardados)
+                estados_dict = json.loads(raw_g)
             except Exception:
                 estados_dict = {}
-            # Combinar: HTML tiene prioridad, session_state como fallback
+            # Combinar con session_state como fallback
             for eid_str, opcion in estados_dict.items():
                 st.session_state[sk(int(eid_str))] = opcion
             registros = []
@@ -878,16 +879,44 @@ def pagina_pasar_lista():
     st.markdown("---")
 
     # ── Construir datos para el componente HTML ──
+    estados_iniciales = {}
     alumnos_js = []
     for _, row in df.iterrows():
         eid    = int(row["estudiante_id"])
         nombre = str(row["nombre"])
         ci     = str(row.get("ci", "") or "")
         estado = st.session_state.get(sk(eid), "P")
+        estados_iniciales[str(eid)] = estado
         alumnos_js.append({"id": eid, "nombre": nombre, "ci": ci, "estado": estado})
 
-    alumnos_json = json.dumps(alumnos_js, ensure_ascii=False)
+    alumnos_json   = json.dumps(alumnos_js, ensure_ascii=False)
+    estados_init_j = json.dumps(estados_iniciales, ensure_ascii=False)
     altura = min(max(len(df) * 72, 300), 800)
+    textarea_key = f"estados_html_{grado_sel}_{fecha_sel}_{turno_sel}"
+
+    # Textarea oculto — JS lo actualiza, Python lo lee al guardar
+    st.markdown("""
+    <style>
+    [data-testid="stTextArea"] { display: none !important; height: 0 !important;
+        overflow: hidden !important; margin: 0 !important; padding: 0 !important; }
+    </style>""", unsafe_allow_html=True)
+
+    estados_raw = st.text_area(
+        "estados_html",
+        value=estados_init_j,
+        key=textarea_key,
+        label_visibility="collapsed",
+        height=1,
+    )
+
+    # Persistir en session_state lo que ya está en el textarea
+    try:
+        d = json.loads(estados_raw)
+        for eid_str, opcion in d.items():
+            st.session_state[sk(int(eid_str))] = opcion
+        st.session_state["estados_html_json"] = estados_raw
+    except Exception:
+        pass
 
     componente_html = f"""<!DOCTYPE html>
 <html>
@@ -925,60 +954,39 @@ body {{ font-family: Arial, sans-serif; background: transparent; }}
 .btn-J.on {{ background: #f39c12; color: #fff; }}
 .btn-r {{ width: 36px; height: 44px; border-radius: 8px; border: 1px solid #555;
           background: transparent; color: #aaa; cursor: pointer; font-size: 16px; }}
-.reporte {{ background: rgba(128,128,128,0.08); border-radius: 8px;
-            padding: 10px; margin: 4px 0 8px 0; font-size: 13px; color: var(--txt, #0f1117); }}
-.metric {{ display: inline-block; text-align: center; margin-right: 16px; }}
-.metric-val {{ font-size: 20px; font-weight: 700; color: var(--txt, #0f1117); }}
-.metric-lbl {{ font-size: 11px; color: var(--txt-soft, #555); }}
-.hist-row {{ display: flex; justify-content: space-between; padding: 5px 8px;
-             border-radius: 5px; margin-bottom: 2px; background: rgba(128,128,128,0.07); }}
 </style>
 </head>
 <body>
 <div id="lista"></div>
-<input type="hidden" id="estados-out" value="">
 <script>
 const alumnos = {alumnos_json};
-const estados = {{}};
-const reporteCache = {{}};
-let reporteAbierto = null;
+const estados = {estados_init_j};
 
-alumnos.forEach(a => {{ estados[a.id] = a.estado; }});
-
-function syncOutput() {{
-    const el = document.getElementById("estados-out");
-    el.value = JSON.stringify(estados);
-    // Enviar a Streamlit
-    window.parent.postMessage({{
-        type: "streamlit:setComponentValue",
-        value: JSON.stringify(estados)
-    }}, "*");
+function syncToStreamlit() {{
+    // Escribir en el textarea de Streamlit via el DOM del padre
+    try {{
+        const iframes = window.parent.document.querySelectorAll('iframe');
+        // Buscar el textarea por su valor actual
+        const textareas = window.parent.document.querySelectorAll('textarea');
+        for(const ta of textareas) {{
+            if(ta.style.display === 'none' || ta.closest('[style*="display: none"]')) continue;
+            // Es el textarea oculto de estados
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLTextAreaElement.prototype, 'value').set;
+            nativeInputValueSetter.call(ta, JSON.stringify(estados));
+            ta.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            break;
+        }}
+    }} catch(e) {{}}
 }}
 
 function marcar(id, val) {{
     estados[id] = val;
-    // Actualizar botones sin re-render completo
     ["P","A","J"].forEach(v => {{
         const btn = document.getElementById("btn-"+v+"-"+id);
         if(btn) btn.className = "btn btn-"+v+(v===val?" on":"");
     }});
-    syncOutput();
-}}
-
-function toggleReporte(id) {{
-    const div = document.getElementById("rep-"+id);
-    if(!div) return;
-    if(reporteAbierto === id) {{
-        div.style.display = "none";
-        reporteAbierto = null;
-        return;
-    }}
-    if(reporteAbierto !== null) {{
-        const old = document.getElementById("rep-"+reporteAbierto);
-        if(old) old.style.display = "none";
-    }}
-    reporteAbierto = id;
-    div.style.display = "block";
+    syncToStreamlit();
 }}
 
 function render() {{
@@ -997,53 +1005,39 @@ function render() {{
                 <button id="btn-P-${{a.id}}" class="btn btn-P${{est==="P"?" on":""}}" onclick="marcar(${{a.id}},'P')">P</button>
                 <button id="btn-A-${{a.id}}" class="btn btn-A${{est==="A"?" on":""}}" onclick="marcar(${{a.id}},'A')">A</button>
                 <button id="btn-J-${{a.id}}" class="btn btn-J${{est==="J"?" on":""}}" onclick="marcar(${{a.id}},'J')">J</button>
-                <button class="btn-r" onclick="toggleReporte(${{a.id}})">📋</button>
             </div>`;
         lista.appendChild(row);
-        // Div reporte (oculto)
-        const repDiv = document.createElement("div");
-        repDiv.id = "rep-"+a.id;
-        repDiv.className = "reporte";
-        repDiv.style.display = "none";
-        repDiv.innerHTML = "<div style='color:#aaa;font-size:12px'>Cargando...</div>";
-        lista.appendChild(repDiv);
     }});
-    syncOutput();
 }}
 
-// Detectar tema del padre y aplicar variables CSS
+// Detectar tema
 (function() {{
     try {{
-        const bg = window.parent.document.body.style.backgroundColor ||
-                   window.getComputedStyle(window.parent.document.body).backgroundColor;
-        const isDark = bg.includes('14, 17') || bg.includes('rgb(14') || bg.includes('#0e1117')
-                    || bg.includes('38, 39') || bg.includes('26, 28');
+        const bg = window.parent.getComputedStyle(window.parent.document.body).backgroundColor;
+        const isDark = bg.includes('14, 17') || bg.includes('38, 39') || bg.includes('26, 28');
         document.documentElement.style.setProperty('--txt',      isDark ? '#f0f2f6' : '#0f1117');
         document.documentElement.style.setProperty('--txt-soft', isDark ? '#aaa'    : '#555');
-        document.body.style.background = 'transparent';
     }} catch(e) {{
-        // fallback: usar color oscuro (modo claro es más común)
-        document.documentElement.style.setProperty('--txt',      '#0f1117');
+        document.documentElement.style.setProperty('--txt', '#0f1117');
         document.documentElement.style.setProperty('--txt-soft', '#555');
     }}
 }})();
+
 render();
 </script>
 </body>
 </html>"""
 
-    resultado = st.components.v1.html(componente_html, height=altura, scrolling=True)
+    st.components.v1.html(componente_html, height=altura, scrolling=True)
 
-    # Capturar estados del componente HTML
-    if resultado and isinstance(resultado, str):
-        try:
-            estados_dict = json.loads(resultado)
-            for eid_str, opcion in estados_dict.items():
-                st.session_state[sk(int(eid_str))] = opcion
-            st.session_state["estados_html_json"] = resultado
-        except Exception:
-            pass
-
+    # Leer estados actualizados del textarea para el botón guardar
+    try:
+        estados_actuales = json.loads(st.session_state.get(textarea_key, estados_init_j))
+        for eid_str, opcion in estados_actuales.items():
+            st.session_state[sk(int(eid_str))] = opcion
+        st.session_state["estados_html_json"] = json.dumps(estados_actuales)
+    except Exception:
+        pass
     # ── Reporte individual (fuera del iframe) ──
     reporte_eid = st.session_state.get("reporte_eid")
     if reporte_eid:
